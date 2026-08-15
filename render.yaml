@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: documentai-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2
+    preDeployCommand: python manage.py migrate
+    healthCheckPath: /api/
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "*"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://documentai-frontend-orpin.vercel.app,https://*.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://documentai-frontend-orpin.vercel.app
+      - key: DATABASE_URL
+        fromDatabase:
+          name: documentai-db
+          property: connectionString
+
+databases:
+  - name: documentai-db
+    plan: free
+    databaseName: snappy
