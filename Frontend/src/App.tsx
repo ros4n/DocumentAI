@@ -52,7 +52,7 @@ export default function App() {
               <circle cx="12" cy="13" r="4" />
             </svg>
           </div>
-          <h1>Snappy</h1>
+          <h1>Snappy</h1> {/* app title */}
         </div>
         <div className="spinner auth-check-spinner" />
       </div>
