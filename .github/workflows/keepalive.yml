@@ -1,0 +1,20 @@
+name: Keep Render backend awake
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            "https://documentai-backend-snp3.onrender.com/api/health/")
+          echo "Health check status: $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::Backend returned HTTP $code"
+            exit 1
+          fi
