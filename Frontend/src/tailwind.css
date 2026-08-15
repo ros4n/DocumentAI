@@ -6,7 +6,7 @@
   --color-foreground: var(--text);
   --color-card: var(--surface);
   --color-card-foreground: var(--text);
-  --color-primary: var(--accent);
+  --color-primary: var(--accent-strong);
   --color-primary-foreground: #ffffff;
   --color-secondary: #eef1f8;
   --color-secondary-foreground: var(--text);
