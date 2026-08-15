@@ -1,0 +1,5 @@
+Django>=6.1,<7
+djangorestframework>=3.18
+django-cors-headers>=4.9
+psycopg[binary]>=3.3
+python-dotenv>=1.2

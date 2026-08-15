@@ -1,0 +1,141 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --color-background: #ffffff;
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef1f8;
+  --color-secondary-foreground: var(--text);
+  --color-muted: rgba(23, 37, 84, 0.07);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: rgba(124, 108, 255, 0.1);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--danger);
+  --color-border: var(--border);
+  --color-input: rgba(23, 37, 84, 0.12);
+  --color-ring: var(--accent);
+}
+
+.wm-dialog {
+  top: auto !important;
+  bottom: 0 !important;
+  left: 50% !important;
+  translate: -50% 0 !important;
+  width: 100% !important;
+  max-width: 430px !important;
+  max-height: 92dvh;
+  border-radius: 24px 24px 0 0 !important;
+  border-color: rgba(255, 255, 255, 0.75) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66)) !important;
+  backdrop-filter: blur(26px) saturate(160%);
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  box-shadow: 0 -16px 50px rgba(60, 80, 140, 0.18), 0 24px 70px rgba(60, 80, 140, 0.25) !important;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
+}
+
+.wm-dialog::before {
+  content: '';
+  display: block;
+  width: 40px;
+  height: 5px;
+  margin: -4px auto 8px;
+  border-radius: 999px;
+  background: rgba(23, 37, 84, 0.18);
+  flex-shrink: 0;
+}
+
+.wm-dialog[data-state='open'] {
+  animation: wm-sheet-in 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.wm-dialog[data-state='closed'] {
+  animation: wm-sheet-out 0.22s ease-in forwards;
+}
+
+@keyframes wm-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes wm-sheet-out {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@media (min-width: 640px) {
+  .wm-dialog {
+    top: 50% !important;
+    bottom: auto !important;
+    translate: -50% -50% !important;
+    width: calc(100% - 32px) !important;
+    max-width: 430px !important;
+    max-height: 85dvh;
+    border-radius: 20px !important;
+    padding-bottom: 1.5rem !important;
+    box-shadow: 0 24px 70px rgba(60, 80, 140, 0.25) !important;
+  }
+
+  .wm-dialog::before {
+    display: none;
+  }
+
+  .wm-dialog[data-state='open'] {
+    animation: wm-zoom-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .wm-dialog[data-state='closed'] {
+    animation: wm-zoom-out 0.15s ease-in forwards;
+  }
+}
+
+@keyframes wm-zoom-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes wm-zoom-out {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+}
+
+.wm-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wm-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
