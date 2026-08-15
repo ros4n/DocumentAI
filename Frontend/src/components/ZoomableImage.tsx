@@ -4,6 +4,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 interface ZoomableImageProps {
   src: string
   alt?: string
+  className?: string
+  onClick?: () => void
 }
 
 interface ViewState {
@@ -12,7 +14,7 @@ interface ViewState {
   y: number
 }
 
-export function ZoomableImage({ src, alt = '' }: ZoomableImageProps) {
+export function ZoomableImage({ src, alt = '', className = '', onClick }: ZoomableImageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<ViewState>({ scale: 1, x: 0, y: 0 })
   const viewRef = useRef<ViewState>({ scale: 1, x: 0, y: 0 })
@@ -165,7 +167,17 @@ export function ZoomableImage({ src, alt = '' }: ZoomableImageProps) {
   return (
     <div
       ref={containerRef}
-      className={`zoomable${dragging ? ' dragging' : ''}${view.scale > 1 ? ' zoomed' : ''}`}
+      className={`zoomable${dragging ? ' dragging' : ''}${view.scale > 1 ? ' zoomed' : ''}${onClick ? ' clickable' : ''}${className ? ` ${className}` : ''}`}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (!onClick) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -185,19 +197,33 @@ export function ZoomableImage({ src, alt = '' }: ZoomableImageProps) {
       <div className="zoom-controls">
         <button
           className="zoom-btn"
-          onClick={() => zoomAt(containerRef.current!.clientWidth / 2, containerRef.current!.clientHeight / 2, 1.25)}
+          onClick={(e) => {
+            e.stopPropagation()
+            zoomAt(containerRef.current!.clientWidth / 2, containerRef.current!.clientHeight / 2, 1.25)
+          }}
           aria-label="Zoom in"
         >
           +
         </button>
         <button
           className="zoom-btn"
-          onClick={() => zoomAt(containerRef.current!.clientWidth / 2, containerRef.current!.clientHeight / 2, 0.8)}
+          onClick={(e) => {
+            e.stopPropagation()
+            zoomAt(containerRef.current!.clientWidth / 2, containerRef.current!.clientHeight / 2, 0.8)
+          }}
           aria-label="Zoom out"
         >
           −
         </button>
-        <button className="zoom-btn" onClick={reset} disabled={view.scale <= 1.0001} aria-label="Reset zoom">
+        <button
+          className="zoom-btn"
+          onClick={(e) => {
+            e.stopPropagation()
+            reset()
+          }}
+          disabled={view.scale <= 1.0001}
+          aria-label="Reset zoom"
+        >
           ⟲
         </button>
       </div>

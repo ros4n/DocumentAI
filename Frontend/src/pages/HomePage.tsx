@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { toast } from 'sonner'
 import ProfilePage from './ProfilePage'
+import FullscreenImageViewer from '../components/FullscreenImageViewer'
 import { ZoomableImage } from '../components/ZoomableImage'
 import CropImage from '../components/CropImage'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
@@ -40,6 +41,15 @@ interface HomePageProps {
 }
 
 type Tab = 'home' | 'scans' | 'history' | 'profile'
+
+type FullscreenImageState = {
+  originalSrc: string
+  originalAlt: string
+  filledSrc: string
+  filledAlt: string
+  title: string
+  subtitle: string
+}
 
 export default function HomePage({ onLogout }: HomePageProps) {
   const session = getSession()
@@ -83,6 +93,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const [nameDraft, setNameDraft] = useState('')
   const [cropOpen, setCropOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
+  const [fullscreenImage, setFullscreenImage] = useState<FullscreenImageState | null>(null)
 
   useEffect(() => {
     return () => {
@@ -420,6 +431,10 @@ export default function HomePage({ onLogout }: HomePageProps) {
     setFilledSaved(false)
     setReviewOpen(false)
     setResultOpen(false)
+  }
+
+  const openFullscreenImage = (next: FullscreenImageState) => {
+    setFullscreenImage(next)
   }
 
   const copyText = async () => {
@@ -1095,11 +1110,39 @@ export default function HomePage({ onLogout }: HomePageProps) {
             <div className="fill-compare">
               <div className="fill-col">
                 <span>Original</span>
-                <ZoomableImage src={captured ?? ''} alt="Original form" />
+                <ZoomableImage
+                  src={captured ?? ''}
+                  alt="Original form"
+                  onClick={() => {
+                    if (!captured || !filledImage) return
+                    openFullscreenImage({
+                      originalSrc: captured,
+                      originalAlt: 'Original form',
+                      filledSrc: filledImage,
+                      filledAlt: 'Filled form',
+                      title: 'Form preview',
+                      subtitle: 'Inspect the original and filled versions side by side',
+                    })
+                  }}
+                />
               </div>
               <div className="fill-col">
                 <span>Filled</span>
-                <ZoomableImage src={filledImage ?? ''} alt="Filled form" />
+                <ZoomableImage
+                  src={filledImage ?? ''}
+                  alt="Filled form"
+                  onClick={() => {
+                    if (!captured || !filledImage) return
+                    openFullscreenImage({
+                      originalSrc: captured,
+                      originalAlt: 'Original form',
+                      filledSrc: filledImage,
+                      filledAlt: 'Filled form',
+                      title: 'Form preview',
+                      subtitle: 'Inspect the original and filled versions side by side',
+                    })
+                  }}
+                />
               </div>
             </div>
             <p className="zoom-hint">Scroll to zoom · drag to pan · double-click to toggle 2×</p>
@@ -1156,12 +1199,39 @@ export default function HomePage({ onLogout }: HomePageProps) {
             <div className="fill-compare">
               <div className="fill-col">
                 <span>Original (unfilled)</span>
-                <ZoomableImage src={scanDetail.preview_image} alt="Original scan" />
+                <ZoomableImage
+                  src={scanDetail.preview_image}
+                  alt="Original scan"
+                  onClick={() => {
+                    if (!scanDetail.filled_image) return
+                    openFullscreenImage({
+                      originalSrc: scanDetail.preview_image,
+                      originalAlt: 'Original scan',
+                      filledSrc: scanDetail.filled_image,
+                      filledAlt: 'Filled form',
+                      title: scanDetail.name,
+                      subtitle: 'Inspect the scan and filled result in full screen',
+                    })
+                  }}
+                />
               </div>
               {scanDetail.filled_image ? (
                 <div className="fill-col">
                   <span>Filled</span>
-                  <ZoomableImage src={scanDetail.filled_image} alt="Filled form" />
+                  <ZoomableImage
+                    src={scanDetail.filled_image}
+                    alt="Filled form"
+                    onClick={() => {
+                      openFullscreenImage({
+                        originalSrc: scanDetail.preview_image,
+                        originalAlt: 'Original scan',
+                        filledSrc: scanDetail.filled_image,
+                        filledAlt: 'Filled form',
+                        title: scanDetail.name,
+                        subtitle: 'Inspect the scan and filled result in full screen',
+                      })
+                    }}
+                  />
                 </div>
               ) : (
                 <div className="fill-col">
@@ -1211,6 +1281,19 @@ export default function HomePage({ onLogout }: HomePageProps) {
             setCropOpen(false)
             showToast('Scan cropped')
           }}
+        />
+      )}
+
+      {fullscreenImage && (
+        <FullscreenImageViewer
+          open={!!fullscreenImage}
+          onClose={() => setFullscreenImage(null)}
+          originalSrc={fullscreenImage.originalSrc}
+          originalAlt={fullscreenImage.originalAlt}
+          filledSrc={fullscreenImage.filledSrc}
+          filledAlt={fullscreenImage.filledAlt}
+          title={fullscreenImage.title}
+          subtitle={fullscreenImage.subtitle}
         />
       )}
 
