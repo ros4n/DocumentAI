@@ -1,8 +1,9 @@
-const CACHE_NAME = 'snappy-v1'
+const CACHE_NAME = 'snappy-v2'
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
+  '/icon.svg',
   '/icon-192.png',
   '/icon-512.png'
 ]
