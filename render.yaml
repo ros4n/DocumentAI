@@ -2,6 +2,7 @@ services:
   - type: web
     name: documentai-backend
     runtime: python
+    pythonVersion: "3.12.10"
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
