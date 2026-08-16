@@ -1,11 +1,13 @@
 import type { Worker } from 'tesseract.js'
 
+import { apiOcr, getSession } from './api'
+
 const SERVER_KEY = 'snappy:ocrServerUrl'
 const SERVER_MODEL = 'Unlimited-OCR'
 
 export interface OcrResult {
   text: string
-  engine: 'server' | 'on-device'
+  engine: 'server' | 'backend' | 'on-device'
   pages: number
   serverError?: string
 }
@@ -57,6 +59,15 @@ function toDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('Could not read the file'))
     reader.readAsDataURL(file)
   })
+}
+
+function dataUrlToFile(dataUrl: string, name: string): File {
+  const [meta, b64] = dataUrl.split(',')
+  const mime = (meta.match(/data:(.*?);/) ?? [])[1] ?? 'image/jpeg'
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new File([bytes], name, { type: mime })
 }
 
 async function recognizeLocal(image: string): Promise<string> {
@@ -125,25 +136,48 @@ export async function extractTextFromImage(
   image: string | File
 ): Promise<OcrResult> {
   const dataUrl = typeof image === 'string' ? image : await toDataUrl(image)
+  const file = typeof image === 'string' ? dataUrlToFile(dataUrl, 'scan.jpg') : image
+  const errors: string[] = []
+
+  const session = getSession()
+  if (session) {
+    try {
+      const result = await apiOcr(session.token, file)
+      return { text: result.text.trim(), engine: 'backend', pages: result.pages }
+    } catch (err) {
+      errors.push(`API: ${(err as Error).message}`)
+    }
+  }
+
   if (serverConfigured()) {
     try {
       const raw = await serverRecognize([dataUrl])
       const text = stripGroundingMarkers(raw)
       return { text, engine: 'server', pages: 1 }
     } catch (err) {
-      const message = (err as Error).message
-      const text = await recognizeLocal(dataUrl)
-      return { text, engine: 'on-device', pages: 1, serverError: message }
+      errors.push((err as Error).message)
     }
   }
+
   const text = await recognizeLocal(dataUrl)
-  return { text, engine: 'on-device', pages: 1 }
+  return { text, engine: 'on-device', pages: 1, serverError: errors.join(' · ') || undefined }
 }
 
 export async function extractTextFromPdf(
   file: File,
   onProgress?: (page: number, total: number) => void
 ): Promise<OcrResult> {
+  const errors: string[] = []
+  const session = getSession()
+  if (session) {
+    try {
+      const result = await apiOcr(session.token, file)
+      return { text: result.text.trim(), engine: 'backend', pages: result.pages }
+    } catch (err) {
+      errors.push(`API: ${(err as Error).message}`)
+    }
+  }
+
   const pdfjsLib = await loadPdfJs()
   const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
     .promise
@@ -176,14 +210,12 @@ export async function extractTextFromPdf(
       text = text.replace(/--- PAGE (\d+) ---/g, '')
       return { text, engine: 'server', pages: total }
     } catch (err) {
-      const message = (err as Error).message
-      const text = await renderLocal()
-      return { text, engine: 'on-device', pages: total, serverError: message }
+      errors.push((err as Error).message)
     }
   }
 
   const text = await renderLocal()
-  return { text, engine: 'on-device', pages: total }
+  return { text, engine: 'on-device', pages: total, serverError: errors.join(' · ') || undefined }
 }
 
 export async function getPdfFirstPage(file: File): Promise<string> {

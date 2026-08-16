@@ -872,6 +872,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
                           <span className="history-time">
                             {fmtTime(s.created_at)} · {s.pages} page{s.pages === 1 ? '' : 's'}
                             {s.ocr_engine === 'server' ? ' · server OCR' : ''}
+                            {s.ocr_engine === 'backend' ? ' · API OCR' : ''}
                           </span>
                         </div>
                       </button>
@@ -897,13 +898,17 @@ export default function HomePage({ onLogout }: HomePageProps) {
           <DialogContent className="wm-dialog">
             <DialogHeader className="text-left">
               <DialogTitle>Extracted text</DialogTitle>
-              {ocrResult.engine === 'server' ? (
+              {ocrResult.engine === 'backend' ? (
+                <span className="status-badge ok">
+                  OCR: Snappy API{ocrResult.pages > 1 ? ` · ${ocrResult.pages} pages` : ''}
+                </span>
+              ) : ocrResult.engine === 'server' ? (
                 <span className="status-badge ok">
                   OCR: Unlimited-OCR server{ocrResult.pages > 1 ? ` · ${ocrResult.pages} pages` : ''}
                 </span>
               ) : ocrResult.serverError ? (
                 <span className="status-badge warn">
-                  OCR: server failed — on-device fallback
+                  OCR: remote OCR failed — on-device fallback
                 </span>
               ) : (
                 <span className="status-badge">

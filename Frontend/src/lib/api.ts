@@ -172,3 +172,32 @@ export function apiRenameScan(token: string, id: number, name: string): Promise<
     body: { name },
   })
 }
+
+export interface OcrApiResult {
+  text: string
+  pages: number
+  engine: string
+}
+
+export async function apiOcr(token: string, file: File): Promise<OcrApiResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_BASE}/ocr/`, {
+    method: 'POST',
+    headers: { Authorization: `Token ${token}` },
+    body: form,
+  })
+  let data: unknown = null
+  try {
+    data = await res.json()
+  } catch {
+    /* no body */
+  }
+  if (!res.ok) {
+    const err = data && typeof data === 'object' && 'error' in data
+      ? String((data as { error: unknown }).error)
+      : `Server error (HTTP ${res.status})`
+    throw new Error(err)
+  }
+  return data as OcrApiResult
+}

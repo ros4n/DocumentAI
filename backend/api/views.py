@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from django.contrib.auth import authenticate
@@ -12,6 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import ScanRecord, UserProfile
+from .ocr import MAX_FILE_SIZE, recognize_image, recognize_pdf
 from .serializers import ProfileSerializer, ScanRecordSerializer
 
 
@@ -117,6 +119,50 @@ def me(request):
             'name': request.user.first_name,
         }
     )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ocr(request):
+    upload = request.FILES.get('file')
+    if upload is None:
+        return Response(
+            {'error': 'A file is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if upload.size > MAX_FILE_SIZE:
+        return Response(
+            {'error': 'File is too large (max 25 MB).'},
+            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        )
+
+    name = (upload.name or '').lower()
+    content_type = (upload.content_type or '').lower()
+    is_pdf = content_type == 'application/pdf' or name.endswith('.pdf')
+    is_image = content_type.startswith('image/')
+    if not (is_pdf or is_image):
+        return Response(
+            {'error': 'Only images and PDFs are supported.'},
+            status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        )
+
+    data = upload.read()
+    try:
+        if is_pdf:
+            pages = recognize_pdf(data)
+            text = '\n\n'.join(
+                f'--- PAGE {index + 1} ---\n{page}'
+                for index, page in enumerate(pages)
+            ).strip()
+            return Response({'text': text, 'pages': len(pages), 'engine': 'rapidocr'})
+        text = recognize_image(data)
+        return Response({'text': text, 'pages': 1, 'engine': 'rapidocr'})
+    except Exception as exc:
+        logger.exception('OCR failed')
+        return Response(
+            {'error': f'OCR failed: {exc}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(['GET', 'PUT'])
