@@ -2,13 +2,15 @@ services:
   - type: web
     name: documentai-backend
     runtime: python
-    pythonVersion: "3.12.10"
+    pythonVersion: "3.12.11"
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
     startCommand: python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2
     healthCheckPath: /api/health/
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.11"
       - key: DJANGO_SECRET_KEY
         sync: false
       - key: DJANGO_DEBUG
