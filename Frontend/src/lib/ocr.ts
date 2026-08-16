@@ -3,6 +3,7 @@ import type { Worker } from 'tesseract.js'
 import { apiOcr, getSession } from './api'
 
 const SERVER_KEY = 'snappy:ocrServerUrl'
+const SERVER_KEY_STORAGE = 'snappy:ocrServerKey'
 const SERVER_MODEL = 'Unlimited-OCR'
 
 export interface OcrResult {
@@ -34,6 +35,22 @@ export function getServerUrl(): string {
 export function setServerUrl(url: string): void {
   try {
     localStorage.setItem(SERVER_KEY, url.trim().replace(/\/+$/, ''))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function getServerKey(): string {
+  try {
+    return localStorage.getItem(SERVER_KEY_STORAGE) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setServerKey(key: string): void {
+  try {
+    localStorage.setItem(SERVER_KEY_STORAGE, key.trim())
   } catch {
     /* storage unavailable */
   }
@@ -93,9 +110,13 @@ export async function serverRecognize(
   const base = getServerUrl()
   const endpoint = base.endsWith('/v1') ? base : `${base}/v1`
   const windowSize = images.length > 1 ? 1024 : 128
+  const apiKey = getServerKey()
   const res = await fetch(`${endpoint}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
     body: JSON.stringify({
       model: SERVER_MODEL,
       messages: [
@@ -128,6 +149,42 @@ export async function serverRecognize(
   const out: unknown = data?.choices?.[0]?.message?.content
   if (typeof out !== 'string' || out.length === 0) {
     throw new Error('OCR server returned no text')
+  }
+  return out.trim()
+}
+
+export async function testOcrServer(): Promise<string> {
+  const base = getServerUrl()
+  const endpoint = base.endsWith('/v1') ? base : `${base}/v1`
+  const apiKey = getServerKey()
+  const res = await fetch(`${endpoint}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: SERVER_MODEL,
+      messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+      max_tokens: 10,
+      temperature: 0,
+    }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const data = await res.json()
+      const errMsg: unknown = data?.error?.message
+      if (typeof errMsg === 'string') detail = ` — ${errMsg}`
+    } catch {
+      /* no response body */
+    }
+    throw new Error(`OCR server error (HTTP ${res.status}${detail})`)
+  }
+  const data = await res.json()
+  const out: unknown = data?.choices?.[0]?.message?.content
+  if (typeof out !== 'string' || out.length === 0) {
+    throw new Error('OCR server returned no response')
   }
   return out.trim()
 }

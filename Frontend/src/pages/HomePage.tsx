@@ -32,6 +32,9 @@ import {
   getPdfFirstPage,
   getServerUrl,
   setServerUrl,
+  getServerKey,
+  setServerKey,
+  testOcrServer,
 } from '../lib/ocr'
 import type { OcrResult } from '../lib/ocr'
 import { downscaleDataUrl } from '../lib/image'
@@ -69,6 +72,10 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [serverUrlInput, setServerUrlInput] = useState(getServerUrl())
+  const [serverKeyInput, setServerKeyInput] = useState(getServerKey())
+  const [ocrTesting, setOcrTesting] = useState(false)
+  const [ocrTestOk, setOcrTestOk] = useState(false)
+  const [ocrTestMsg, setOcrTestMsg] = useState('')
   const [llm, setLlm] = useState<LlmConfig>(getLlmConfig)
   const [llmTesting, setLlmTesting] = useState(false)
   const [llmTestOk, setLlmTestOk] = useState(false)
@@ -460,6 +467,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
 
   const openSettings = () => {
     setServerUrlInput(getServerUrl())
+    setServerKeyInput(getServerKey())
     setLlm(getLlmConfig())
     setSettingsOpen(true)
   }
@@ -479,6 +487,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
 
   const saveSettings = () => {
     setServerUrl(serverUrlInput)
+    setServerKey(serverKeyInput)
     setLlmConfig(llm)
     setSettingsOpen(false)
     showToast('Settings saved')
@@ -497,6 +506,22 @@ export default function HomePage({ onLogout }: HomePageProps) {
       setLlmTestMsg((err as Error).message)
     } finally {
       setLlmTesting(false)
+    }
+  }
+
+  const testOcr = async () => {
+    setOcrTesting(true)
+    setOcrTestOk(false)
+    setOcrTestMsg('')
+    try {
+      const reply = await testOcrServer()
+      setOcrTestOk(true)
+      setOcrTestMsg(reply.includes('OK') ? 'Connected — server replied OK' : `Connected — reply: ${reply}`)
+    } catch (err) {
+      setOcrTestOk(false)
+      setOcrTestMsg((err as Error).message)
+    } finally {
+      setOcrTesting(false)
     }
   }
 
@@ -1327,6 +1352,30 @@ export default function HomePage({ onLogout }: HomePageProps) {
                 Point to a server running baidu/Unlimited-OCR (served as{' '}
                 <code>Unlimited-OCR</code>). Leave empty to always use on-device OCR.
               </p>
+              <Input
+                value={serverKeyInput}
+                onChange={(e) => setServerKeyInput(e.target.value)}
+                placeholder="API key (optional, sent as Bearer token)"
+                type="password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <div className="model-picker">
+                <Button
+                  variant="secondary"
+                  className="btn-test"
+                  onClick={testOcr}
+                  disabled={ocrTesting || !serverUrlInput.trim()}
+                >
+                  {ocrTesting ? <span className="spinner" /> : 'Test connection'}
+                </Button>
+                {ocrTestMsg && (
+                  <span className={`llm-test-msg ${ocrTestOk ? 'ok' : 'fail'}`}>
+                    {ocrTestMsg}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="settings-divider" />
             <div className="settings-field">
