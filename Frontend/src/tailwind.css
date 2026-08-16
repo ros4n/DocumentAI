@@ -2,21 +2,21 @@
 @import "tw-animate-css";
 
 @theme inline {
-  --color-background: #ffffff;
+  --color-background: var(--bg);
   --color-foreground: var(--text);
   --color-card: var(--surface);
   --color-card-foreground: var(--text);
-  --color-primary: var(--accent-strong);
+  --color-primary: var(--accent);
   --color-primary-foreground: #ffffff;
-  --color-secondary: #eef1f8;
+  --color-secondary: #f1f5f9;
   --color-secondary-foreground: var(--text);
-  --color-muted: rgba(23, 37, 84, 0.07);
+  --color-muted: #f1f2f3;
   --color-muted-foreground: var(--text-muted);
-  --color-accent: rgba(124, 108, 255, 0.1);
-  --color-accent-foreground: var(--text);
+  --color-accent: var(--accent);
+  --color-accent-foreground: #ffffff;
   --color-destructive: var(--danger);
   --color-border: var(--border);
-  --color-input: rgba(23, 37, 84, 0.12);
+  --color-input: var(--border);
   --color-ring: var(--accent);
 }
 
@@ -28,12 +28,10 @@
   width: 100% !important;
   max-width: 430px !important;
   max-height: 92dvh;
-  border-radius: 24px 24px 0 0 !important;
-  border-color: rgba(255, 255, 255, 0.75) !important;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66)) !important;
-  backdrop-filter: blur(26px) saturate(160%);
-  -webkit-backdrop-filter: blur(26px) saturate(160%);
-  box-shadow: 0 -16px 50px rgba(60, 80, 140, 0.18), 0 24px 70px rgba(60, 80, 140, 0.25) !important;
+  border-radius: 20px 20px 0 0 !important;
+  border-color: var(--border) !important;
+  background: #ffffff !important;
+  box-shadow: 0 -8px 40px rgba(15, 23, 42, 0.14), 0 24px 60px rgba(15, 23, 42, 0.18) !important;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
@@ -46,7 +44,7 @@
   height: 5px;
   margin: -4px auto 8px;
   border-radius: 999px;
-  background: rgba(23, 37, 84, 0.18);
+  background: rgba(15, 23, 42, 0.12);
   flex-shrink: 0;
 }
 
@@ -84,9 +82,9 @@
     width: calc(100% - 32px) !important;
     max-width: 430px !important;
     max-height: 85dvh;
-    border-radius: 20px !important;
+    border-radius: 18px !important;
     padding-bottom: 1.5rem !important;
-    box-shadow: 0 24px 70px rgba(60, 80, 140, 0.25) !important;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18) !important;
   }
 
   .wm-dialog::before {

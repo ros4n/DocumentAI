@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { loadProfile, saveProfile, fetchProfileFromServer, saveProfileToServer } from '../lib/profile'
 import type { ProfileData } from '../lib/profile'
 import { getSession } from '../lib/api'
@@ -37,7 +37,7 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
         setProfile(server)
       })
       .catch(() => {
-        if (!cancelled) showToast('Offline — showing saved local details')
+        if (!cancelled) showToast('Offline â€” showing saved local details')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -99,7 +99,7 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
   }
 
   const group = (title: string, keys: FieldKey[]) => (
-    <Card className="profile-card backdrop-blur-xl">
+    <Card className="profile-card">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>
@@ -113,7 +113,7 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
               id={`profile-${key}`}
               value={profile[key]}
               onChange={update(key)}
-              placeholder="—"
+              placeholder="â€”"
               autoCapitalize="words"
               spellCheck={false}
             />
@@ -135,7 +135,7 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
       {group('Work', ['employer', 'occupation'])}
       {group('Other', ['nationality', 'idNumber'])}
 
-      <Card className="profile-card backdrop-blur-xl">
+      <Card className="profile-card">
         <CardHeader>
           <CardTitle>Custom fields</CardTitle>
         </CardHeader>
