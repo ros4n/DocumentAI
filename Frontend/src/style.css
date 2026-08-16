@@ -134,10 +134,16 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  background: var(--accent-grad);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 18px;
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.brand-logo-img {
+  width: 40px;
+  height: 38px;
+  display: block;
 }
 
 .auth-brand h1 {
@@ -376,6 +382,18 @@ input {
 .home-title {
   font-size: 17px;
   font-weight: 700;
+}
+
+.home-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.home-logo {
+  width: 20px;
+  height: 19px;
+  display: block;
 }
 
 .icon-btn {

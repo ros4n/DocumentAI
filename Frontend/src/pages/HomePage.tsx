@@ -671,7 +671,10 @@ export default function HomePage({ onLogout }: HomePageProps) {
           </Avatar>
           <div>
             <p className="greeting">Hey {firstName || 'there'}</p>
-            <p className="home-title">Snappy Scanner</p>
+            <div className="home-brand">
+              <img className="home-logo" src="/icon.svg" alt="" />
+              <p className="home-title">Snappy Scanner</p>
+            </div>
           </div>
         </div>
         <div className="header-actions">
