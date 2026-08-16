@@ -8,10 +8,10 @@
   --text: #0f172a;
   --text-muted: #475569;
   --text-faint: #94a3b8;
-  --accent: #2563eb;
-  --accent-strong: #1d4ed8;
-  --accent-2: #3b82f6;
-  --accent-grad: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  --accent: #0f172a;
+  --accent-strong: #020617;
+  --accent-2: #334155;
+  --accent-grad: linear-gradient(135deg, #0f172a 0%, #334155 100%);
   --danger: #dc2626;
   --success: #16a34a;
   --radius: 14px;
@@ -42,9 +42,9 @@ body {
 body {
   font-family: var(--sans);
   background:
-    radial-gradient(50% 60% at 15% 8%, rgba(37, 99, 235, 0.06), transparent 70%),
-    radial-gradient(45% 55% at 88% 20%, rgba(59, 130, 246, 0.05), transparent 70%),
-    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    radial-gradient(50% 60% at 15% 8%, rgba(15, 23, 42, 0.05), transparent 70%),
+    radial-gradient(45% 55% at 88% 20%, rgba(15, 23, 42, 0.04), transparent 70%),
+    linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   display: flex;
@@ -116,8 +116,8 @@ input {
   inset: -40% -30% auto -30%;
   height: 70%;
   background:
-    radial-gradient(40% 45% at 30% 35%, rgba(37, 99, 235, 0.1), transparent 70%),
-    radial-gradient(35% 40% at 75% 25%, rgba(59, 130, 246, 0.07), transparent 70%);
+    radial-gradient(40% 45% at 30% 35%, rgba(15, 23, 42, 0.06), transparent 70%),
+    radial-gradient(35% 40% at 75% 25%, rgba(15, 23, 42, 0.05), transparent 70%);
   pointer-events: none;
 }
 
@@ -177,7 +177,7 @@ input {
 
 .auth-field:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.14);
 }
 
 .auth-field .field-icon {
@@ -234,13 +234,13 @@ input {
   background: var(--accent-grad);
   border-radius: 12px;
   transition: transform 0.12s, box-shadow 0.2s, opacity 0.2s, filter 0.2s;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
   filter: brightness(1.05);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.3);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -327,7 +327,7 @@ input {
 
 .auth-check-spinner {
   margin: 32px auto 0;
-  border-color: rgba(37, 99, 235, 0.2);
+  border-color: rgba(15, 23, 42, 0.2);
   border-top-color: var(--accent);
 }
 
@@ -371,7 +371,7 @@ input {
   color: #fff;
   background: var(--accent-grad);
   border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.25);
 }
 
 .greeting {
@@ -553,7 +553,7 @@ input {
   right: 12%;
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent-2), transparent);
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 12px rgba(15, 23, 42, 0.35);
   animation: scanline 2.4s ease-in-out infinite;
 }
 
@@ -590,7 +590,7 @@ input {
   border-radius: 50%;
   background: var(--surface);
   border: 2px solid var(--accent);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.25);
   transition: transform 0.12s;
 }
 
@@ -599,7 +599,7 @@ input {
   height: 54px;
   border-radius: 50%;
   background: var(--accent-grad);
-  box-shadow: 0 0 16px rgba(37, 99, 235, 0.35);
+  box-shadow: 0 0 16px rgba(15, 23, 42, 0.3);
 }
 
 .shutter:active {
@@ -832,7 +832,7 @@ input {
 
 .search-box:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.14);
 }
 
 .search-input {
@@ -996,7 +996,7 @@ input {
 
 .detail-name-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.14);
 }
 
 .detail-no-filled {
@@ -1106,7 +1106,7 @@ input {
 .crop-box {
   position: absolute;
   border: 1.5px solid var(--accent);
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(15, 23, 42, 0.08);
   box-shadow: 0 0 0 9999px rgba(8, 12, 22, 0.55);
   cursor: move;
   touch-action: none;
@@ -1245,11 +1245,11 @@ input {
 
 .tab-item.active {
   color: var(--accent);
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(15, 23, 42, 0.08);
 }
 
 .tab-item.active .tab-icon {
-  filter: drop-shadow(0 0 8px rgba(37, 99, 235, 0.35));
+  filter: drop-shadow(0 0 8px rgba(15, 23, 42, 0.3));
 }
 
 /* Toast */
@@ -1416,13 +1416,13 @@ input {
 
 .status-badge.llm {
   color: var(--accent);
-  border-color: rgba(37, 99, 235, 0.3);
-  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(15, 23, 42, 0.3);
+  background: rgba(15, 23, 42, 0.08);
 }
 
 .status-badge.llm::before {
   background: var(--accent);
-  box-shadow: 0 0 6px rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 6px rgba(15, 23, 42, 0.4);
 }
 
 .status-badge.warn {
@@ -1487,7 +1487,7 @@ input {
 
 .settings-field input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.14);
 }
 
 .settings-field input::placeholder {
@@ -1548,7 +1548,7 @@ input {
 
 .model-picker .model-select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.14);
   outline: none;
 }
 
@@ -1609,7 +1609,7 @@ input {
 
 .profile-field input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.14);
 }
 
 .profile-field input::placeholder {
