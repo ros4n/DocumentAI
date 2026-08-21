@@ -1881,8 +1881,9 @@ input {
 
 .fill-compare {
   display: flex;
-  gap: 10px;
-  overflow-x: auto;
+  flex-direction: column;
+  gap: 16px;
+  overflow: visible;
 }
 
 .fill-col {
@@ -1890,19 +1891,29 @@ input {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  align-items: center;
 }
 
 .fill-col span {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-muted);
   text-align: center;
+  letter-spacing: 0.02em;
 }
 
-.fill-col img {
+.fill-col .zoomable {
   width: 100%;
-  border: 1px solid var(--border);
+  max-width: 420px;
+  height: auto;
+  aspect-ratio: 3/4;
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.fill-col .zoomable img {
   border-radius: 12px;
 }
 
@@ -2043,7 +2054,8 @@ input {
 .fullscreen-viewer-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 14px;
   min-height: 0;
 }
@@ -2122,8 +2134,11 @@ input {
   }
 
   .fill-compare {
-    flex-direction: column;
-    overflow: visible;
+    gap: 14px;
+  }
+
+  .fill-col .zoomable {
+    max-width: 100%;
   }
 
   .fullscreen-viewer {
@@ -2134,7 +2149,7 @@ input {
   }
 
   .fullscreen-viewer-grid {
-    grid-template-columns: 1fr;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
   }
 
   .custom-field-row {
