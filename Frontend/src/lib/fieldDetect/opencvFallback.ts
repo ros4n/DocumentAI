@@ -19,94 +19,134 @@ import type { BoundingBox, DetectedField, FieldDetectionResult } from '../types'
 type Cv = any
 
 /**
- * OpenCV.js is loaded at runtime from the official hosted WASM build — the
- * same lazy pattern Tesseract.js uses for its worker/wasm assets. Loaded via
- * streaming fetch so we can report real download progress (the file is
- * ~10 MB); the browser HTTP-cache and the app's service worker make every
- * subsequent load near-instant.
+ * OpenCV.js is loaded at runtime — same lazy pattern as Tesseract.js.
+ * Sources are tried in order:
+ *   1. jsDelivr (global edge CDN, CORS-enabled → real download progress)
+ *   2. docs.opencv.org (official host; no CORS → falls back to plain <script>)
+ * The service worker caches whichever source succeeds, so this cost is
+ * paid once per device.
  */
-const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js'
+const OPENCV_SOURCES = [
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js',
+  'https://docs.opencv.org/4.9.0/opencv.js',
+]
+
+/** Hard ceiling for the entire engine load — nothing may hang silently. */
+const LOAD_DEADLINE_MS = 150_000
+const INIT_TIMEOUT_MS = 45_000
 
 let cvPromise: Promise<Cv> | null = null
 
 function injectScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[data-opencv="1"]`
-    )
-    if (existing?.dataset.loaded === '1') {
-      resolve()
-      return
-    }
     const script = document.createElement('script')
     script.src = src
     script.async = true
     script.dataset.opencv = '1'
-    script.onload = () => {
-      script.dataset.loaded = '1'
-      resolve()
-    }
+    script.onload = () => resolve()
     script.onerror = () => reject(new Error('OpenCV.js failed to execute'))
     document.head.appendChild(script)
   })
 }
 
-async function loadCv(
+async function attemptSource(
+  src: string,
+  w: any,
   onStage?: (message: string) => void
-): Promise<Cv> {
+): Promise<void> {
+  let objectUrl: string | null = null
+  try {
+    let scriptUrl = src
+    try {
+      onStage?.('Downloading on-device engine…')
+      const res = await fetch(src)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const total = Number(res.headers.get('Content-Length') ?? 0)
+      if (res.body) {
+        const reader = res.body.getReader()
+        const chunks: Uint8Array[] = []
+        let received = 0
+        let lastMsg = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          chunks.push(value)
+          received += value.byteLength
+          // Content-Length may be compressed size while the reader yields
+          // decompressed bytes — clamp so % never exceeds 99 before done.
+          const msg =
+            total > 0
+              ? `Downloading on-device engine · ${Math.min(99, Math.floor((received / total) * 100))}%`
+              : `Downloading on-device engine · ${(received / 1048576).toFixed(1)} MB`
+          if (msg !== lastMsg) {
+            lastMsg = msg
+            onStage?.(msg)
+          }
+        }
+        onStage?.('Starting vision engine…')
+        const blob = new Blob(chunks as BlobPart[], {
+          type: 'application/javascript',
+        })
+        objectUrl = URL.createObjectURL(blob)
+        scriptUrl = objectUrl
+      }
+    } catch {
+      // Streaming unavailable (CORS/network) — plain script tag still works,
+      // just without byte-level progress.
+      onStage?.('Downloading on-device engine…')
+    }
+
+    await injectScript(scriptUrl)
+
+    // WASM runtime initializes asynchronously after evaluation
+    const started = Date.now()
+    while (!(w.cv && typeof w.cv.Mat === 'function')) {
+      if (Date.now() - started > INIT_TIMEOUT_MS) {
+        throw new Error('OpenCV.js failed to initialize')
+      }
+      await new Promise((r) => window.setTimeout(r, 80))
+    }
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function loadCv(onStage?: (message: string) => void): Promise<Cv> {
   if (!cvPromise) {
     cvPromise = (async () => {
       const w = window as any
       if (w.cv && typeof w.cv.Mat === 'function') return w.cv
 
-      // Streamed fetch gives us real progress for the big WASM payload;
-      // falls back to a plain <script> tag if streaming is unavailable.
-      let scriptUrl = OPENCV_CDN_URL
-      let objectUrl: string | null = null
-      try {
-        onStage?.('Downloading on-device engine…')
-        const res = await fetch(OPENCV_CDN_URL)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const total = Number(res.headers.get('Content-Length') ?? 0)
-        if (res.body && total > 0) {
-          const reader = res.body.getReader()
-          const chunks: Uint8Array[] = []
-          let received = 0
-          let lastPct = -1
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            chunks.push(value)
-            received += value.byteLength
-            const pct = Math.floor((received / total) * 100)
-            if (pct !== lastPct) {
-              lastPct = pct
-              onStage?.(`Downloading on-device engine · ${pct}%`)
-            }
+      const attempt = async () => {
+        for (const src of OPENCV_SOURCES) {
+          try {
+            await attemptSource(src, w, onStage)
+            return
+          } catch (err) {
+            console.warn(`OpenCV source failed (${src})`, err)
           }
-          const blob = new Blob(chunks as BlobPart[], {
-            type: 'application/javascript',
-          })
-          objectUrl = URL.createObjectURL(blob)
-          scriptUrl = objectUrl
         }
-      } catch {
-        /* fall back to direct script tag below */
+        throw new Error(
+          'Could not load the on-device vision engine. Check your connection and try again.'
+        )
       }
 
+      // Overall deadline: even a stalled connection resolves to an error
+      const withDeadline = Promise.race([
+        attempt(),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(
+            () => reject(new Error('On-device engine took too long to load')),
+            LOAD_DEADLINE_MS
+          )
+        ),
+      ])
+
       try {
-        onStage?.('Starting vision engine…')
-        await injectScript(scriptUrl)
-        // WASM runtime initializes asynchronously after evaluation
-        const started = Date.now()
-        while (!(w.cv && typeof w.cv.Mat === 'function')) {
-          if (Date.now() - started > 45000) {
-            throw new Error('OpenCV.js failed to initialize')
-          }
-          await new Promise((r) => window.setTimeout(r, 80))
-        }
-      } finally {
-        if (objectUrl) URL.revokeObjectURL(objectUrl)
+        await withDeadline
+      } catch (err) {
+        cvPromise = null // allow a clean retry next time
+        throw err
       }
       return w.cv as Cv
     })()
