@@ -5,6 +5,7 @@ import {
 } from './ocr'
 import { chat, extractJson, getLlmConfig, llmConfigured } from './llm'
 import type { ProfileData } from './profile'
+import type { DetectedField, FieldDetectionResult } from './types'
 
 export interface TextElement {
   text: string
@@ -15,7 +16,7 @@ export interface TextElement {
 export interface FormField {
   id: string
   label: string
-  kind: 'text' | 'checkbox' | 'date'
+  kind: 'text' | 'checkbox' | 'date' | 'signature'
   bbox: [number, number, number, number]
   labelBBox: [number, number, number, number]
   group?: string
@@ -645,6 +646,10 @@ export function heuristicMatch(
 ): FillDecision[] {
   const decisions = fields.map((field) => {
     const label = normalize(field.label)
+    if (field.kind === 'signature') {
+      // Signatures are never auto-filled — product decision, flagged for review
+      return { fieldId: field.id, value: '', checked: false, confidence: 0 }
+    }
     if (field.kind === 'checkbox') {
       for (const [keywords, key] of KEYWORD_MAP) {
         if (keywords.some((k) => label.includes(k))) {
@@ -817,6 +822,7 @@ export interface FormAnalysis {
   structureEngine: 'server' | 'on-device' | 'llm'
   matchSource: 'llm' | 'heuristic'
   error?: string
+  detectionWarnings?: string[]
 }
 
 interface LlmFieldEntry extends Record<string, unknown> {
@@ -969,5 +975,73 @@ export async function analyzeForm(
     structureEngine: engine,
     matchSource: match.source,
     error: match.error,
+  }
+}
+
+/* ============ DETECTED-FIELD PIPELINE (fieldDetect contract) ============ */
+
+/**
+ * Convert the unified DetectedField[] contract (pixel bboxes, lib/types.ts)
+ * into the internal FormField layout this module's matching + rendering
+ * pipeline consumes (normalized 0–1000 coordinate space). This is the only
+ * place the two shapes meet — every detection tier funnels through here.
+ */
+export function detectedToFormFields(
+  detection: FieldDetectionResult
+): FormField[] {
+  const sx = 1000 / Math.max(1, detection.pageWidth)
+  const sy = 1000 / Math.max(1, detection.pageHeight)
+  return detection.fields.map((f: DetectedField, i) => {
+    const x1 = f.bbox.x * sx
+    const y1 = f.bbox.y * sy
+    const x2 = (f.bbox.x + f.bbox.width) * sx
+    const y2 = (f.bbox.y + f.bbox.height) * sy
+    return {
+      id: f.id || `field-${i}`,
+      label: f.label,
+      kind:
+        f.fieldType === 'text_line'
+          ? 'text'
+          : f.fieldType === 'radio'
+            ? 'checkbox'
+            : f.fieldType,
+      shape: f.fieldType === 'radio' ? 'radio' : 'checkbox',
+      bbox: [x1, y1, x2, y2] as [number, number, number, number],
+      labelBBox: [x1, y1 - sy * 4, x2, y1] as [number, number, number, number],
+      group: f.groupId ?? '',
+    }
+  })
+}
+
+/**
+ * Analyze a form whose fields were already produced by the field-detection
+ * pipeline (Tier 0 acroform / Tier 1 VLM / Tier 2 OpenCV). Only value
+ * matching runs here — detection already happened upstream.
+ */
+export async function analyzeDetectedFields(
+  detection: FieldDetectionResult,
+  profile: ProfileData
+): Promise<FormAnalysis> {
+  if (detection.fields.length === 0) {
+    return {
+      fields: [],
+      decisions: [],
+      structureEngine: 'on-device',
+      matchSource: 'heuristic',
+      detectionWarnings: [
+        ...(detection.warnings ?? []),
+        'No fillable fields were detected',
+      ],
+    }
+  }
+  const fields = detectedToFormFields(detection)
+  const match = await matchFields(fields, profile)
+  return {
+    fields,
+    decisions: match.decisions,
+    structureEngine: detection.tierUsed === 'cv' ? 'on-device' : 'server',
+    matchSource: match.source,
+    error: match.error,
+    detectionWarnings: detection.warnings,
   }
 }

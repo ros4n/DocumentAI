@@ -116,10 +116,18 @@ export default function CaptureView({
                     title={fillBusy ? 'Filling your form' : 'Extracting text'}
                     steps={
                       fillBusy
-                        ? ['Analyzing form', 'Matching profile values', 'Rendering filled copy']
+                        ? ['Detecting fields', 'Matching profile values', 'Rendering filled copy']
                         : ['Preparing document', 'Reading text (OCR)']
                     }
-                    forceStep={fillBusy ? (fillStatus.startsWith('Analyzing') ? 0 : 2) : undefined}
+                    forceStep={
+                      fillBusy
+                        ? fillStatus.startsWith('Detecting')
+                          ? 0
+                          : fillStatus.startsWith('Rendering')
+                            ? 2
+                            : 1
+                        : undefined
+                    }
                     note={fillBusy ? fillStatus : ocrStatus || undefined}
                   />
                 </div>

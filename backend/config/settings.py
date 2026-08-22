@@ -72,6 +72,14 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOW_CREDENTIALS = True
 
+# ── Field detection (Tier 1 VLM) ─────────────────────────────────────────
+# OpenAI-compatible vision endpoint that runs PaddleOCR-VL or DeepSeek-OCR.
+# When unset, /api/documents/detect-fields/ returns 503 and clients fall
+# back to their on-device OpenCV tier automatically.
+FIELD_DETECT_VLM_URL = os.getenv('FIELD_DETECT_VLM_URL', '')          # e.g. http://localhost:8001/v1
+FIELD_DETECT_VLM_API_KEY = os.getenv('FIELD_DETECT_VLM_API_KEY', '')  # optional Bearer token
+FIELD_DETECT_VLM_MODEL = os.getenv('FIELD_DETECT_VLM_MODEL', '')      # e.g. paddleocr-vl
+
 ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [

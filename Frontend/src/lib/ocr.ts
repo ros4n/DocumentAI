@@ -15,6 +15,10 @@ export interface OcrResult {
 
 let workerPromise: Promise<Worker> | null = null
 
+/** Shared rasterization scale for PDF pages — all detection tiers and the
+ *  renderer use this so pixel coordinates stay consistent across the app. */
+export const RASTER_SCALE = 2
+
 async function loadPdfJs() {
   const pdfjsLib = await import('pdfjs-dist')
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -22,6 +26,49 @@ async function loadPdfJs() {
     import.meta.url
   ).toString()
   return pdfjsLib
+}
+
+export interface RasterizedPage {
+  dataUrl: string
+  width: number
+  height: number
+}
+
+/**
+ * Rasterize PDF pages to JPEG data URLs with PDF.js. Shared by text OCR,
+ * field detection (Tier 1/2), and preview generation.
+ */
+export async function rasterizePdfPages(
+  file: File | Blob,
+  onProgress?: (page: number, total: number) => void,
+  opts?: { maxPages?: number }
+): Promise<RasterizedPage[]> {
+  const pdfjsLib = await loadPdfJs()
+  const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
+    .promise
+  const limit = Math.min(doc.numPages, opts?.maxPages ?? doc.numPages)
+  const pages: RasterizedPage[] = []
+  for (let i = 1; i <= limit; i++) {
+    onProgress?.(i, doc.numPages)
+    const page = await doc.getPage(i)
+    const viewport = page.getViewport({ scale: RASTER_SCALE })
+    const canvas = document.createElement('canvas')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    await page.render({ canvas, viewport }).promise
+    pages.push({
+      dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+      width: Math.round(viewport.width),
+      height: Math.round(viewport.height),
+    })
+  }
+  return pages
+}
+
+export async function getPdfPageCount(file: File | Blob): Promise<number> {
+  const pdfjsLib = await loadPdfJs()
+  const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise
+  return doc.numPages
 }
 
 export function getServerUrl(): string {
@@ -86,6 +133,8 @@ function dataUrlToFile(dataUrl: string, name: string): File {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   return new File([bytes], name, { type: mime })
 }
+
+export { dataUrlToFile }
 
 async function recognizeLocal(image: string): Promise<string> {
   const worker = await getOcrWorker()
@@ -235,21 +284,9 @@ export async function extractTextFromPdf(
     }
   }
 
-  const pdfjsLib = await loadPdfJs()
-  const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
-    .promise
-  const total = doc.numPages
-  const pages: string[] = []
-  for (let i = 1; i <= total; i++) {
-    onProgress?.(i, total)
-    const page = await doc.getPage(i)
-    const viewport = page.getViewport({ scale: 2 })
-    const canvas = document.createElement('canvas')
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    await page.render({ canvas, viewport }).promise
-    pages.push(canvas.toDataURL('image/jpeg', 0.9))
-  }
+  const rendered = await rasterizePdfPages(file, onProgress)
+  const pages = rendered.map((p) => p.dataUrl)
+  const total = pages.length
 
   const renderLocal = async (): Promise<string> => {
     let text = ''
@@ -276,13 +313,6 @@ export async function extractTextFromPdf(
 }
 
 export async function getPdfFirstPage(file: File): Promise<string> {
-  const pdfjsLib = await loadPdfJs()
-  const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise
-  const page = await doc.getPage(1)
-  const viewport = page.getViewport({ scale: 1.5 })
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  await page.render({ canvas, viewport }).promise
-  return canvas.toDataURL('image/jpeg', 0.85)
+  const [first] = await rasterizePdfPages(file, undefined, { maxPages: 1 })
+  return first.dataUrl
 }

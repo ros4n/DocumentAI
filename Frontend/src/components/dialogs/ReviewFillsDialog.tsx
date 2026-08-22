@@ -137,7 +137,11 @@ export default function ReviewFillsDialog({
                       </span>
                     )}
                   </p>
-                  {field.kind === 'checkbox' ? (
+                  {field.kind === 'signature' ? (
+                    <p className="review-signature-note">
+                      Signature — never auto-filled. Sign by hand after printing.
+                    </p>
+                  ) : field.kind === 'checkbox' ? (
                     <label className="review-checkbox">
                       <input
                         type="checkbox"

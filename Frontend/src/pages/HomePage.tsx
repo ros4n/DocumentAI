@@ -9,6 +9,7 @@ import type { Tab } from '../components/TabBar'
 import ScansLibrary from '../components/ScansLibrary'
 import HistoryList from '../components/HistoryList'
 import FullscreenImageViewer from '../components/FullscreenImageViewer'
+import FieldReviewOverlay from '../components/FieldReviewOverlay'
 import CropImage from '../components/CropImage'
 import OcrResultDialog from '../components/dialogs/OcrResultDialog'
 import ReviewFillsDialog from '../components/dialogs/ReviewFillsDialog'
@@ -16,8 +17,11 @@ import FillResultDialog from '../components/dialogs/FillResultDialog'
 import ScanDetailDialog from '../components/dialogs/ScanDetailDialog'
 import EngineSettingsDialog from '../components/dialogs/EngineSettingsDialog'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
-import { analyzeForm } from '../lib/formFill'
+import { analyzeForm, analyzeDetectedFields } from '../lib/formFill'
 import type { FillDecision, FormAnalysis } from '../lib/formFill'
+import { detectFieldsWithImage } from '../lib/fieldDetect'
+import type { DetectionWithImage } from '../lib/fieldDetect'
+import type { DetectedField } from '../lib/types'
 import { renderFilledForm } from '../lib/renderFill'
 import { hasProfileData, loadProfile } from '../lib/profile'
 import {
@@ -32,6 +36,7 @@ import type { ScanRecord } from '../lib/api'
 import { getLlmConfig, llmConfigured, listModels, setLlmConfig, testConnection } from '../lib/llm'
 import type { LlmConfig } from '../lib/llm'
 import {
+  dataUrlToFile,
   extractTextFromImage,
   extractTextFromPdf,
   getPdfFirstPage,
@@ -83,6 +88,9 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const streamRef = useRef<MediaStream | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pdfInputRef = useRef<HTMLInputElement>(null)
+  /** Original source bytes for the field-detection pipeline (PDF → Tier 0) */
+  const sourceFileRef = useRef<File | null>(null)
+  const sourceTypeRef = useRef<'image' | 'pdf'>('image')
   const [streamActive, setStreamActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const [captured, setCaptured] = useState<string | null>(null)
@@ -108,6 +116,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const [fillStatus, setFillStatus] = useState('')
   const [analysis, setAnalysis] = useState<FormAnalysis | null>(null)
   const [edits, setEdits] = useState<Array<FillDecision & { include: boolean }>>([])
+  const [detection, setDetection] = useState<DetectionWithImage | null>(null)
   const [filledImage, setFilledImage] = useState<string | null>(null)
   const [fillSkipped, setFillSkipped] = useState<string[]>([])
   const [scans, setScans] = useState<ScanRecord[]>([])
@@ -205,12 +214,16 @@ export default function HomePage({ onLogout }: HomePageProps) {
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     canvas.getContext('2d')!.drawImage(video, 0, 0)
+    sourceFileRef.current = null
+    sourceTypeRef.current = 'image'
     setCaptured(canvas.toDataURL('image/jpeg', 0.92))
   }
 
   const handleUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    sourceFileRef.current = file
+    sourceTypeRef.current = 'image'
     const reader = new FileReader()
     reader.onload = () => setCaptured(reader.result as string)
     reader.readAsDataURL(file)
@@ -251,6 +264,8 @@ export default function HomePage({ onLogout }: HomePageProps) {
   }
 
   const retake = () => {
+    sourceFileRef.current = null
+    sourceTypeRef.current = 'image'
     setCaptured(null)
   }
 
@@ -282,6 +297,8 @@ export default function HomePage({ onLogout }: HomePageProps) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file || ocrBusy) return
+    sourceFileRef.current = file
+    sourceTypeRef.current = 'pdf'
     setOcrBusy(true)
     setOcrStatus('Loading PDF…')
     try {
@@ -316,9 +333,56 @@ export default function HomePage({ onLogout }: HomePageProps) {
       return
     }
     setFillBusy(true)
-    setFillStatus('Analyzing form…')
+    setFillStatus('Detecting fields…')
     try {
-      const result = await analyzeForm(captured, profile)
+      // Unified detection pipeline — PDF bytes enable Tier 0 AcroForm,
+      // everything else rasterizes/uses pixels for Tier 1 → Tier 2.
+      let file = sourceFileRef.current
+      let inputType = sourceTypeRef.current
+      if (!file || inputType === 'image') {
+        file = dataUrlToFile(captured, 'scan.jpg') // crop/retake-safe: use current pixels
+        inputType = 'image'
+      }
+      const result = await detectFieldsWithImage(file, inputType)
+
+      if (
+        result.detection.fields.length === 0 &&
+        result.detection.tierUsed !== 'acroform'
+      ) {
+        // Nothing detected — fall back to the legacy on-image analysis so
+        // the flow never dead-ends on a hard zero.
+        setFillStatus('Analyzing form…')
+        const legacy = await analyzeForm(captured, profile)
+        setAnalysis(legacy)
+        setEdits(
+          legacy.decisions.map((d) => ({
+            ...d,
+            include: true,
+          }))
+        )
+        if (legacy.error) {
+          showToast('AI failed — used on-device matching')
+        }
+        return
+      }
+
+      setDetection(result)
+    } catch (err) {
+      showToast((err as Error).message)
+    } finally {
+      setFillBusy(false)
+      setFillStatus('')
+    }
+  }
+
+  const confirmDetectedFields = async (fields: DetectedField[]) => {
+    if (!detection) return
+    setDetection(null)
+    setFillBusy(true)
+    setFillStatus('Matching profile values…')
+    try {
+      const merged = { ...detection.detection, fields }
+      const result = await analyzeDetectedFields(merged, loadProfile())
       setAnalysis(result)
       setEdits(
         result.decisions.map((d) => ({
@@ -327,7 +391,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
         }))
       )
       if (result.error) {
-        showToast('AI failed — used on-device matching')
+        showToast('AI failed — used keyword matching')
       }
     } catch (err) {
       showToast((err as Error).message)
@@ -437,6 +501,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const closeFillFlow = () => {
     setAnalysis(null)
     setEdits([])
+    setDetection(null)
     setFilledImage(null)
     setFillSkipped([])
     setFilledSaved(false)
@@ -682,6 +747,15 @@ export default function HomePage({ onLogout }: HomePageProps) {
           onClose={() => setOcrResult(null)}
           onCopy={copyText}
           onDownload={downloadText}
+        />
+      )}
+
+      {detection && (
+        <FieldReviewOverlay
+          imageDataUrl={detection.imageDataUrl}
+          detection={detection.detection}
+          onConfirm={confirmDetectedFields}
+          onCancel={() => setDetection(null)}
         />
       )}
 

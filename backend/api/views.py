@@ -15,6 +15,12 @@ from rest_framework.response import Response
 from .models import ScanRecord, UserProfile
 from .ocr import MAX_FILE_SIZE, recognize_image, recognize_pdf
 from .serializers import ProfileSerializer, ScanRecordSerializer
+from .field_detect import (
+    MAX_FILE_SIZE as DETECT_MAX_FILE_SIZE,
+    FieldDetectionError,
+    detect_fields_in_image,
+    vlm_configured,
+)
 
 
 def seed_profile(user, name=''):
@@ -163,6 +169,53 @@ def ocr(request):
             {'error': f'OCR failed: {exc}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def detect_fields(request):
+    """Tier-1 structured field detection (frontend falls back to on-device
+    OpenCV automatically when this returns 503/5xx — same pattern as OCR)."""
+    if not vlm_configured():
+        return Response(
+            {'error': 'Field detection backend is not configured.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    upload = request.FILES.get('image')
+    if upload is None:
+        return Response(
+            {'error': 'An image file is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if upload.size > DETECT_MAX_FILE_SIZE:
+        return Response(
+            {'error': 'File is too large (max 25 MB).'},
+            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        )
+    content_type = (upload.content_type or '').lower()
+    if not content_type.startswith('image/'):
+        return Response(
+            {'error': 'Only rasterized page images are supported (send PNG/JPEG).'},
+            status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        )
+
+    data = upload.read()
+    try:
+        result = detect_fields_in_image(data, content_type)
+    except FieldDetectionError as exc:
+        logger.warning('Field detection failed: %s', exc)
+        return Response(
+            {'error': f'Field detection failed: {exc}'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    except Exception:
+        logger.exception('Unexpected field-detection error')
+        return Response(
+            {'error': 'Field detection failed unexpectedly.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response(result)
 
 
 @api_view(['GET', 'PUT'])

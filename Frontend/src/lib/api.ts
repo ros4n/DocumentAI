@@ -201,3 +201,41 @@ export async function apiOcr(token: string, file: File): Promise<OcrApiResult> {
   }
   return data as OcrApiResult
 }
+
+/* ── Field detection (Tier 1 — backend VLM) ─────────────────────────── */
+
+export async function apiDetectFields(
+  token: string | null,
+  file: Blob,
+  filename = 'page.jpg',
+  timeoutMs = 15000
+): Promise<unknown> {
+  const form = new FormData()
+  form.append('image', file, filename)
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${API_BASE}/documents/detect-fields/`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Token ${token}` } : undefined,
+      body: form,
+      signal: controller.signal,
+    })
+    let data: unknown = null
+    try {
+      data = await res.json()
+    } catch {
+      /* no body */
+    }
+    if (!res.ok) {
+      const err =
+        data && typeof data === 'object' && 'error' in data
+          ? String((data as { error: unknown }).error)
+          : `Field detection server error (HTTP ${res.status})`
+      throw new Error(err)
+    }
+    return data
+  } finally {
+    window.clearTimeout(timer)
+  }
+}

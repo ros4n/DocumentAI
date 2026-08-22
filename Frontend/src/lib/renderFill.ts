@@ -110,6 +110,12 @@ export async function renderFilledForm(
     const w = Math.max(2, px2 - px1)
     const h = Math.max(2, py2 - py1)
 
+    if (field.kind === 'signature') {
+      // Signatures are never auto-generated — flagged so the user sees why
+      skipped.push(`${field.label || field.id} (signature left blank)`)
+      continue
+    }
+
     if (field.kind === 'checkbox') {
       let boxX = px1
       let boxY = py1

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import health, login, me, ocr, profile, register, scan_detail, scans
+from .views import detect_fields, health, login, me, ocr, profile, register, scan_detail, scans
 
 urlpatterns = [
     path('health/', health, name='health'),
@@ -11,4 +11,5 @@ urlpatterns = [
     path('scans/', scans, name='scans'),
     path('scans/<int:scan_id>/', scan_detail, name='scan-detail'),
     path('ocr/', ocr, name='ocr'),
+    path('documents/detect-fields/', detect_fields, name='detect-fields'),
 ]
