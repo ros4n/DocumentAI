@@ -121,11 +121,11 @@ export default function CaptureView({
                     }
                     forceStep={
                       fillBusy
-                        ? fillStatus.startsWith('Detecting')
-                          ? 0
-                          : fillStatus.startsWith('Rendering')
-                            ? 2
-                            : 1
+                        ? fillStatus.startsWith('Rendering')
+                          ? 2
+                          : fillStatus.startsWith('Matching')
+                            ? 1
+                            : 0
                         : undefined
                     }
                     note={fillBusy ? fillStatus : ocrStatus || undefined}

@@ -343,7 +343,9 @@ export default function HomePage({ onLogout }: HomePageProps) {
         file = dataUrlToFile(captured, 'scan.jpg') // crop/retake-safe: use current pixels
         inputType = 'image'
       }
-      const result = await detectFieldsWithImage(file, inputType)
+      const result = await detectFieldsWithImage(file, inputType, (stage) => {
+        setFillStatus(stage)
+      })
 
       if (
         result.detection.fields.length === 0 &&

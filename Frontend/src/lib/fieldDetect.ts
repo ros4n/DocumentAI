@@ -1,18 +1,18 @@
-/* ============================================================
+﻿/* ============================================================
    Field-detection pipeline orchestrator (Section 6).
 
    Unified entry point for image AND pdf input:
 
-     PDF ──► rasterize page ──► TIER 0 AcroForm (pdf-lib)
-                                  │ zero fields?
-                                  ▼
-     image ────────────────► TIER 1 backend VLM (15s timeout)
-                                  │ unreachable / invalid?
-                                  ▼
+     PDF â”€â”€â–º rasterize page â”€â”€â–º TIER 0 AcroForm (pdf-lib)
+                                  â”‚ zero fields?
+                                  â–¼
+     image â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–º TIER 1 backend VLM (15s timeout)
+                                  â”‚ unreachable / invalid?
+                                  â–¼
                               TIER 2 on-device OpenCV.js
 
    Every tier emits the same DetectedField[] contract from
-   lib/types.ts — downstream never knows which tier ran.
+   lib/types.ts â€” downstream never knows which tier ran.
    ============================================================ */
 
 import { getPdfPageCount, rasterizePdfPages } from './ocr'
@@ -31,9 +31,13 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 export interface DetectionWithImage {
   detection: FieldDetectionResult
-  /** Rasterized page / source image — same coordinate space as `detection` */
+  /** Rasterized page / source image â€” same coordinate space as `detection` */
   imageDataUrl: string
 }
+
+/** Optional live status callback so UI can show what Tier 2 is doing
+ *  (downloading engine %, OCR pass, shape analysis) instead of a silent hang */
+export type DetectionStageCallback = (message: string) => void
 
 /**
  * Core pipeline over a known rasterized page. `imageBlob` is uploaded to the
@@ -43,33 +47,37 @@ async function runPipeline(
   imageBlob: Blob,
   imageDataUrl: string,
   pageWidth: number,
-  pageHeight: number
+  pageHeight: number,
+  onStage?: DetectionStageCallback
 ): Promise<FieldDetectionResult> {
+  onStage?.('Contacting detection serviceâ€¦')
   try {
     return await detectFieldsViaBackendVLM(imageBlob, pageWidth, pageHeight)
   } catch (err) {
     console.warn('Backend field detection unavailable, falling back to on-device', err)
-    return await detectFieldsViaOpenCV(imageDataUrl, pageWidth, pageHeight)
+    return await detectFieldsViaOpenCV(imageDataUrl, pageWidth, pageHeight, onStage)
   }
 }
 
 /** Spec-conform entry point. Returns just the FieldDetectionResult. */
 export async function detectFields(
   input: File | Blob,
-  inputType: 'image' | 'pdf'
+  inputType: 'image' | 'pdf',
+  onStage?: DetectionStageCallback
 ): Promise<FieldDetectionResult> {
-  const { detection } = await detectFieldsWithImage(input, inputType)
+  const { detection } = await detectFieldsWithImage(input, inputType, onStage)
   return detection
 }
 
 /**
- * Full variant — also returns the rasterized page so callers can show the
+ * Full variant â€” also returns the rasterized page so callers can show the
  * review overlay and render fills without re-rasterizing.
  * MVP scope: first page only (matches the single-image fill flow).
  */
 export async function detectFieldsWithImage(
   input: File | Blob,
-  inputType: 'image' | 'pdf'
+  inputType: 'image' | 'pdf',
+  onStage?: DetectionStageCallback
 ): Promise<DetectionWithImage> {
   if (inputType === 'pdf') {
     const [pageCount, pages] = await Promise.all([
@@ -78,7 +86,7 @@ export async function detectFieldsWithImage(
     ])
     const page = pages[0]
 
-    // Tier 0 — real AcroForm fields: no OCR/CV needed at all.
+    // Tier 0 â€” real AcroForm fields: no OCR/CV needed at all.
     // pdf-lib loads lazily so image-only users never download it.
     const { tryAcroFormExtraction } = await import('./fieldDetect/acroform')
     const acro = await tryAcroFormExtraction(input, page).catch(() => null)
@@ -86,26 +94,26 @@ export async function detectFieldsWithImage(
       if (pageCount > 1) {
         acro.warnings = [
           ...(acro.warnings ?? []),
-          `PDF has ${pageCount} pages — only page 1 was analyzed`,
+          `PDF has ${pageCount} pages â€” only page 1 was analyzed`,
         ]
       }
       return { detection: acro, imageDataUrl: page.dataUrl }
     }
 
-    let detection = await runPipeline(input, page.dataUrl, page.width, page.height)
+    let detection = await runPipeline(input, page.dataUrl, page.width, page.height, onStage)
     if (pageCount > 1) {
       detection = {
         ...detection,
         warnings: [
           ...(detection.warnings ?? []),
-          `PDF has ${pageCount} pages — only page 1 was analyzed`,
+          `PDF has ${pageCount} pages â€” only page 1 was analyzed`,
         ],
       }
     }
     return { detection, imageDataUrl: page.dataUrl }
   }
 
-  // Image input — unified path
+  // Image input â€” unified path
   const dataUrl = await blobToDataUrl(input)
   const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
     const img = new Image()
@@ -113,6 +121,6 @@ export async function detectFieldsWithImage(
     img.onerror = () => reject(new Error('Could not decode the captured image'))
     img.src = dataUrl
   })
-  const detection = await runPipeline(input, dataUrl, dims.w, dims.h)
+  const detection = await runPipeline(input, dataUrl, dims.w, dims.h, onStage)
   return { detection, imageDataUrl: dataUrl }
 }

@@ -20,51 +20,93 @@ type Cv = any
 
 /**
  * OpenCV.js is loaded at runtime from the official hosted WASM build — the
- * same lazy pattern Tesseract.js uses for its worker/wasm assets. Loading via
- * script tag (rather than an npm CJS package) avoids bundler interop issues
- * with the 15MB UMD file and keeps it out of the app bundle entirely.
+ * same lazy pattern Tesseract.js uses for its worker/wasm assets. Loaded via
+ * streaming fetch so we can report real download progress (the file is
+ * ~10 MB); the browser HTTP-cache and the app's service worker make every
+ * subsequent load near-instant.
  */
 const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js'
 
 let cvPromise: Promise<Cv> | null = null
 
-function loadScriptOnce(src: string): Promise<void> {
+function injectScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${src}"]`
+      `script[data-opencv="1"]`
     )
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true })
-      existing.addEventListener('error', () => reject(new Error('OpenCV.js failed to load')), { once: true })
-      if (existing.dataset.loaded === '1') resolve()
+    if (existing?.dataset.loaded === '1') {
+      resolve()
       return
     }
     const script = document.createElement('script')
     script.src = src
     script.async = true
+    script.dataset.opencv = '1'
     script.onload = () => {
       script.dataset.loaded = '1'
       resolve()
     }
-    script.onerror = () => reject(new Error('OpenCV.js failed to load'))
+    script.onerror = () => reject(new Error('OpenCV.js failed to execute'))
     document.head.appendChild(script)
   })
 }
 
-async function loadCv(): Promise<Cv> {
+async function loadCv(
+  onStage?: (message: string) => void
+): Promise<Cv> {
   if (!cvPromise) {
     cvPromise = (async () => {
       const w = window as any
       if (w.cv && typeof w.cv.Mat === 'function') return w.cv
-      await loadScriptOnce(OPENCV_CDN_URL)
-      // The WASM runtime initializes asynchronously after the script loads;
-      // window.cv gains Mat once ready. Poll, capped at 30s for slow devices.
-      const started = Date.now()
-      while (!(w.cv && typeof w.cv.Mat === 'function')) {
-        if (Date.now() - started > 30000) {
-          throw new Error('OpenCV.js failed to initialize')
+
+      // Streamed fetch gives us real progress for the big WASM payload;
+      // falls back to a plain <script> tag if streaming is unavailable.
+      let scriptUrl = OPENCV_CDN_URL
+      let objectUrl: string | null = null
+      try {
+        onStage?.('Downloading on-device engine…')
+        const res = await fetch(OPENCV_CDN_URL)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const total = Number(res.headers.get('Content-Length') ?? 0)
+        if (res.body && total > 0) {
+          const reader = res.body.getReader()
+          const chunks: Uint8Array[] = []
+          let received = 0
+          let lastPct = -1
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            chunks.push(value)
+            received += value.byteLength
+            const pct = Math.floor((received / total) * 100)
+            if (pct !== lastPct) {
+              lastPct = pct
+              onStage?.(`Downloading on-device engine · ${pct}%`)
+            }
+          }
+          const blob = new Blob(chunks as BlobPart[], {
+            type: 'application/javascript',
+          })
+          objectUrl = URL.createObjectURL(blob)
+          scriptUrl = objectUrl
         }
-        await new Promise((r) => window.setTimeout(r, 80))
+      } catch {
+        /* fall back to direct script tag below */
+      }
+
+      try {
+        onStage?.('Starting vision engine…')
+        await injectScript(scriptUrl)
+        // WASM runtime initializes asynchronously after evaluation
+        const started = Date.now()
+        while (!(w.cv && typeof w.cv.Mat === 'function')) {
+          if (Date.now() - started > 45000) {
+            throw new Error('OpenCV.js failed to initialize')
+          }
+          await new Promise((r) => window.setTimeout(r, 80))
+        }
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
       }
       return w.cv as Cv
     })()
@@ -77,23 +119,28 @@ async function loadCv(): Promise<Cv> {
 
 async function imageToMat(
   cv: Cv,
-  dataUrl: string
+  dataUrl: string,
+  maxSide = Infinity
 ): Promise<{ mat: any; width: number; height: number }> {
   const img = new Image()
-  // Decode via canvas, then hand the RGBA buffer to OpenCV
-  return new Promise((resolve, reject) => {
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0)
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      resolve({ mat: cv.matFromImageData(imageData), width: canvas.width, height: canvas.height })
-    }
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
     img.onerror = () => reject(new Error('Could not decode the page image'))
     img.src = dataUrl
   })
+  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight))
+  const width = Math.max(1, Math.round(img.naturalWidth * scale))
+  const height = Math.max(1, Math.round(img.naturalHeight * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')!
+  // White backdrop first — transparent PNGs would become black in RGBA→GRAY
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, width, height)
+  ctx.drawImage(img, 0, 0, width, height)
+  const imageData = ctx.getImageData(0, 0, width, height)
+  return { mat: cv.matFromImageData(imageData), width, height }
 }
 
 interface OcrWord {
@@ -452,18 +499,27 @@ function groupRadios(radios: DetectedField[]): void {
 
 /* ── Main entry ────────────────────────────────────────────────────── */
 
+/** Cap on the CV working resolution. Hough transforms and contour scans
+ *  are O(area) in WASM — running them on full-res camera photos (12 MP)
+ *  takes minutes; everything runs fine at ≤1400 px and coordinates are
+ *  mapped back to source pixels afterwards. */
+const WORK_MAX_SIDE = 1400
+
 export async function detectFieldsViaOpenCV(
   dataUrl: string,
   pageWidth: number,
-  pageHeight: number
+  pageHeight: number,
+  onStage?: (message: string) => void
 ): Promise<FieldDetectionResult> {
   const warnings: string[] = []
   if (pageWidth > 0 && pageHeight > 0) {
     warnings.push('Backend detection unavailable — using on-device shape analysis')
   }
-  const cv = await loadCv()
+  const cv = await loadCv(onStage)
 
-  const { mat: src, width: W, height: H } = await imageToMat(cv, dataUrl)
+  // Downscaled workspace — all OpenCV passes run here
+  const { mat: src, width: W, height: H } = await imageToMat(cv, dataUrl, WORK_MAX_SIDE)
+  const scale = pageWidth > 0 ? W / pageWidth : 1
   const gray = new cv.Mat()
   const binLines = new cv.Mat()
   const binShapes = new cv.Mat()
@@ -474,12 +530,23 @@ export async function detectFieldsViaOpenCV(
     cv.adaptiveThreshold(gray, binShapes, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 15, 6)
 
     /* ---- OCR layout first: everything pairs against it ---- */
-    const words = await tesseractWords(dataUrl)
+    // Tesseract runs on the FULL-RESOLUTION image for best accuracy;
+    // its word boxes are then scaled into the workspace.
+    onStage?.('Reading page text (on-device OCR)…')
+    const rawWords = await tesseractWords(dataUrl)
+    const words = rawWords.map((w) => ({
+      ...w,
+      x0: w.x0 * scale,
+      y0: w.y0 * scale,
+      x1: w.x1 * scale,
+      y1: w.y1 * scale,
+    }))
     const heights = words.map((w) => w.y1 - w.y0).sort((a, b) => a - b)
     const medianH = heights.length > 0 ? heights[Math.floor(heights.length / 2)] : 22
     const estTextH = Math.min(48, Math.max(12, medianH))
 
-    /* ---- Pass A: text-line candidates ---- */
+    /* ---- Pass A + B ---- */
+    onStage?.('Analyzing page shapes…')
     const segs = mergeRowSegments(houghLineSegments(cv, binLines, W)).filter(
       (s) => s.x2 - s.x1 < W * 0.85 && s.y1 < H - 8 && s.y1 > 8
     )
@@ -520,6 +587,20 @@ export async function detectFieldsViaOpenCV(
     )
 
     /* ---- Assemble DetectedFields with Pass C pairing ---- */
+    // Workspace boxes are mapped back to SOURCE pixel space (÷ scale) so
+    // every tier emits coordinates in the same space as the page image.
+    const toSourceBox = (b: BoundingBox): BoundingBox =>
+      clampBox(
+        {
+          x: b.x / scale,
+          y: b.y / scale,
+          width: b.width / scale,
+          height: b.height / scale,
+        },
+        pageWidth || W,
+        pageHeight || H
+      )
+
     const fields: DetectedField[] = []
     let index = 0
     const lowConfidence: string[] = []
@@ -532,7 +613,7 @@ export async function detectFieldsViaOpenCV(
         id: `field_${index++}`,
         label: pair?.label ?? '',
         fieldType: /\b(date|dob|birth|expir)\b/i.test(pair?.label ?? '') ? 'date' : 'text_line',
-        bbox: t.bbox,
+        bbox: toSourceBox(t.bbox),
         confidence: Math.min(0.9, confidence),
         source: 'cv',
       })
@@ -550,7 +631,7 @@ export async function detectFieldsViaOpenCV(
         id: `field_${index++}`,
         label: pair?.label ?? '',
         fieldType: m.kind,
-        bbox: m.bbox,
+        bbox: toSourceBox(m.bbox),
         confidence: Math.min(0.9, confidence),
         source: 'cv',
       }
@@ -576,8 +657,8 @@ export async function detectFieldsViaOpenCV(
     }
 
     return {
-      pageWidth: W,
-      pageHeight: H,
+      pageWidth: pageWidth > 0 ? pageWidth : W,
+      pageHeight: pageHeight > 0 ? pageHeight : H,
       fields,
       tierUsed: 'cv',
       warnings,

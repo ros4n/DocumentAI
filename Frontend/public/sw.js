@@ -1,4 +1,5 @@
-const CACHE_NAME = 'snappy-v2'
+const CACHE_NAME = 'snappy-v3'
+const RUNTIME_CACHE = 'snappy-runtime-v3'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -6,6 +7,17 @@ const APP_SHELL = [
   '/icon.svg',
   '/icon-192.png',
   '/icon-512.png'
+]
+
+// Heavy on-device engines live on third-party CDNs (OpenCV.js WASM,
+// Tesseract.js worker + core + language data). Cache them so the
+// multi-megabyte download happens once per device, not per session.
+const ENGINE_HOSTS = [
+  'docs.opencv.org',
+  'cdn.jsdelivr.net',
+  'unpkg.com',
+  'tessdata.projectnaptha.com',
+  'tesseract.projectnaptha.com'
 ]
 
 self.addEventListener('install', (event) => {
@@ -30,6 +42,25 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return
 
   const url = new URL(request.url)
+
+  // Cache-first for engine assets on third-party CDNs
+  if (ENGINE_HOSTS.includes(url.hostname)) {
+    event.respondWith(
+      caches.open(RUNTIME_CACHE).then((cache) =>
+        cache.match(request).then((cached) => {
+          if (cached) return cached
+          return fetch(request).then((response) => {
+            if (response && (response.ok || response.type === 'opaque')) {
+              cache.put(request, response.clone())
+            }
+            return response
+          })
+        })
+      )
+    )
+    return
+  }
+
   if (url.origin !== self.location.origin) return
 
   if (request.mode === 'navigate') {
