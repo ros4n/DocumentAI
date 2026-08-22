@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { toast } from 'sonner'
 import ProfilePage from './ProfilePage'
+import TabBar from '../components/TabBar'
+import CaptureView from '../components/CaptureView'
+import type { Tab } from '../components/TabBar'
+import ScansLibrary from '../components/ScansLibrary'
+import HistoryList from '../components/HistoryList'
 import FullscreenImageViewer from '../components/FullscreenImageViewer'
-import { ZoomableImage } from '../components/ZoomableImage'
 import CropImage from '../components/CropImage'
+import OcrResultDialog from '../components/dialogs/OcrResultDialog'
+import ReviewFillsDialog from '../components/dialogs/ReviewFillsDialog'
+import FillResultDialog from '../components/dialogs/FillResultDialog'
+import ScanDetailDialog from '../components/dialogs/ScanDetailDialog'
+import EngineSettingsDialog from '../components/dialogs/EngineSettingsDialog'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog'
-import { Input } from '../components/ui/input'
-import { Switch } from '../components/ui/switch'
-import { analyzeForm, suggestOptions } from '../lib/formFill'
+import { analyzeForm } from '../lib/formFill'
 import type { FillDecision, FormAnalysis } from '../lib/formFill'
 import { renderFilledForm } from '../lib/renderFill'
 import { hasProfileData, loadProfile } from '../lib/profile'
@@ -38,12 +43,11 @@ import {
 } from '../lib/ocr'
 import type { OcrResult } from '../lib/ocr'
 import { downscaleDataUrl } from '../lib/image'
+import { defaultScanName } from '../lib/scanFormat'
 
 interface HomePageProps {
   onLogout: () => void
 }
-
-type Tab = 'home' | 'scans' | 'history' | 'profile'
 
 type FullscreenImageState = {
   originalSrc: string
@@ -52,6 +56,22 @@ type FullscreenImageState = {
   filledAlt: string
   title: string
   subtitle: string
+}
+
+const TAB_INDEX: Record<Tab, number> = { home: 0, scans: 1, history: 2, profile: 3 }
+
+const tabVariants = {
+  initial: (dir: number) => ({ opacity: 0, x: dir * 26 }),
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const },
+  },
+  exit: (dir: number) => ({
+    opacity: 0,
+    x: dir * -18,
+    transition: { duration: 0.16 },
+  }),
 }
 
 export default function HomePage({ onLogout }: HomePageProps) {
@@ -67,6 +87,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const [cameraError, setCameraError] = useState('')
   const [captured, setCaptured] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('home')
+  const [tabDir, setTabDir] = useState(0)
   const [ocrBusy, setOcrBusy] = useState(false)
   const [ocrStatus, setOcrStatus] = useState('')
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null)
@@ -87,7 +108,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
   const [fillStatus, setFillStatus] = useState('')
   const [analysis, setAnalysis] = useState<FormAnalysis | null>(null)
   const [edits, setEdits] = useState<Array<FillDecision & { include: boolean }>>([])
-  const [reviewOpen, setReviewOpen] = useState(false)
   const [filledImage, setFilledImage] = useState<string | null>(null)
   const [fillSkipped, setFillSkipped] = useState<string[]>([])
   const [scans, setScans] = useState<ScanRecord[]>([])
@@ -129,7 +149,11 @@ export default function HomePage({ onLogout }: HomePageProps) {
     if (scanDetail) setNameDraft(scanDetail.name)
   }, [scanDetail?.id, scanDetail?.name])
 
-  const defaultScanName = (iso: string) => `Scan · ${fmtDate(iso)} ${fmtTime(iso)}`
+  const changeTab = (next: Tab) => {
+    if (next === tab) return
+    setTabDir(TAB_INDEX[next] - TAB_INDEX[tab])
+    setTab(next)
+  }
 
   const saveScanToHistory = async (
     preview: string,
@@ -288,7 +312,7 @@ export default function HomePage({ onLogout }: HomePageProps) {
     const profile = loadProfile()
     if (!hasProfileData(profile)) {
       showToast('Save your details in the Profile tab first')
-      setTab('profile')
+      changeTab('profile')
       return
     }
     setFillBusy(true)
@@ -302,7 +326,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
           include: true,
         }))
       )
-      setReviewOpen(true)
       if (result.error) {
         showToast('AI failed — used on-device matching')
       }
@@ -316,7 +339,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
 
   const applyFill = async () => {
     if (!analysis || !captured) return
-    setReviewOpen(false)
     setFillBusy(true)
     setFillStatus('Rendering filled form…')
     try {
@@ -401,33 +423,15 @@ export default function HomePage({ onLogout }: HomePageProps) {
     )
   }
 
-  const saveFilled = () => {
-    if (!filledImage) return
-    const a = document.createElement('a')
-    a.href = filledImage
-    a.download = `snappy-filled-${Date.now()}.jpg`
-    a.click()
-    showToast('Filled form saved')
-  }
-
-  const shareFilled = async () => {
-    if (!filledImage) return
-    const blob = await (await fetch(filledImage)).blob()
-    const file = new File([blob], 'filled-form.jpg', { type: 'image/jpeg' })
-    if (navigator.share) {
-      try {
-        await navigator.share({ files: [file], title: 'Snappy filled form' })
-      } catch {
-        /* user cancelled */
-      }
-    } else {
-      try {
-        await navigator.clipboard.writeText(filledImage)
-        showToast('Image copied to clipboard')
-      } catch {
-        showToast('Sharing not supported on this device')
-      }
-    }
+  const toggleGroup = (group: string, include: boolean) => {
+    if (!analysis) return
+    setEdits((prev) =>
+      prev.map((x) => {
+        const f2 = analysis.fields.find((y) => y.id === x.fieldId)
+        if (f2?.group !== group) return x
+        return { ...x, include }
+      })
+    )
   }
 
   const closeFillFlow = () => {
@@ -436,7 +440,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
     setFilledImage(null)
     setFillSkipped([])
     setFilledSaved(false)
-    setReviewOpen(false)
     setResultOpen(false)
   }
 
@@ -527,39 +530,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
 
   const engine: 'server' | 'on-device' = serverUrlInput ? 'server' : 'on-device'
 
-  const fmtTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
-
-  const dayLabel = (iso: string): string => {
-    const d = new Date(iso)
-    const now = new Date()
-    const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-    const days = Math.floor((start(now) - start(d)) / 86400000)
-    if (days <= 0) return 'Today'
-    if (days === 1) return 'Yesterday'
-    if (days <= 7) return 'This week'
-    return fmtDate(iso)
-  }
-
-  const groupHistory = (items: ScanRecord[]) => {
-    const order = ['Today', 'Yesterday', 'This week']
-    const groups = new Map<string, ScanRecord[]>()
-    for (const s of items) {
-      const key = dayLabel(s.created_at)
-      const arr = groups.get(key)
-      if (arr) arr.push(s)
-      else groups.set(key, [s])
-    }
-    const keys = order.filter((k) => groups.has(k))
-    for (const k of [...groups.keys()].sort()) {
-      if (!keys.includes(k)) keys.push(k)
-    }
-    return keys.map((key) => ({ label: key, items: groups.get(key)! }))
-  }
-
   const filteredScans = scans.filter((s) => {
     const q = historySearch.trim().toLowerCase()
     if (q && !s.ocr_text.toLowerCase().includes(q)) return false
@@ -568,13 +538,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
     if (historyStatus === 'ocr' && s.filled_at) return false
     return true
   })
-
-  const scanBadge = (s: ScanRecord) =>
-    s.filled_at ? (
-      <Badge className="scan-badge">Filled</Badge>
-    ) : (
-      <Badge variant="secondary" className="scan-badge">OCR</Badge>
-    )
 
   const deleteScan = async (id: number) => {
     const session = getSession()
@@ -609,59 +572,6 @@ export default function HomePage({ onLogout }: HomePageProps) {
     }
   }
 
-  const scanCard = (s: ScanRecord) => (
-    <div className="scan-card" key={s.id} onClick={() => setScanDetail(s)}>
-      {s.preview_image ? (
-        <img className="scan-thumb" src={s.preview_image} alt="Scan preview" />
-      ) : (
-        <div className="scan-thumb scan-thumb-empty">
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="4" />
-            <circle cx="9" cy="9" r="2" />
-            <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
-          </svg>
-        </div>
-      )}
-      <div className="scan-card-body">
-        <div className="scan-card-top">
-          <span className="scan-name">{s.name || defaultScanName(s.created_at)}</span>
-          {scanBadge(s)}
-        </div>
-        <span className="scan-date">
-          {dayLabel(s.created_at)} · {fmtTime(s.created_at)}
-        </span>
-      </div>
-      <button
-        className="icon-btn scan-card-del"
-        onClick={(e) => {
-          e.stopPropagation()
-          deleteScan(s.id)
-        }}
-        aria-label="Delete scan"
-        title="Delete"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="3 6 5 6 21 6" />
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-        </svg>
-      </button>
-    </div>
-  )
-
-  const emptyTab = (title: string, subtitle: string) => (
-    <div className="empty-tab">
-      <div className="empty-icon">
-        <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="4" />
-          <circle cx="9" cy="9" r="2" />
-          <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
-        </svg>
-      </div>
-      <h2>{title}</h2>
-      <p>{subtitle}</p>
-    </div>
-  )
-
   return (
     <div className="home-page">
       <header className="home-header">
@@ -688,621 +598,178 @@ export default function HomePage({ onLogout }: HomePageProps) {
       </header>
 
       <main className="home-content">
-        {tab === 'home' && (
-          <>
-            <div className="engine-status">
-              <span className={`status-badge ${serverUrlInput ? 'ok' : ''}`}>
-                {serverUrlInput ? 'OCR: Unlimited-OCR server' : 'OCR: on-device (Tesseract)'}
-              </span>
-              <span className={`status-badge ${llmConfigured() ? 'llm' : ''}`}>
-                {llmConfigured()
-                  ? `AI: ${llm.url.includes('google') ? 'Gemini' : 'configured'}`
-                  : 'AI: not set up'}
-              </span>
-            </div>
-
-            <div className="scanner-card">
-              {captured ? (
-                <div className="scan-result">
-                  <img src={captured} alt="Captured scan" />
-                  <div className="scan-actions">
-                    <Button variant="secondary" onClick={retake} disabled={ocrBusy || fillBusy}>Retake</Button>
-                    <Button variant="secondary" onClick={() => setCropOpen(true)} disabled={ocrBusy || fillBusy}>Crop</Button>
-                    <Button variant="secondary" onClick={extractFromCapture} disabled={ocrBusy || fillBusy}>
-                      {ocrBusy ? <span className="spinner" /> : 'Text'}
-                    </Button>
-                    <Button onClick={saveScan} disabled={ocrBusy || fillBusy}>Save</Button>
-                    <Button onClick={shareScan} disabled={ocrBusy || fillBusy}>Share</Button>
-                  </div>
-                  <Button variant="secondary" className="btn-fill w-full" onClick={startFill} disabled={ocrBusy || fillBusy}>
-                    {fillBusy ? (
-                      <span className="fill-busy"><span className="spinner" />{fillStatus}</span>
-                    ) : (
-                      <>
-                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                        </svg>
-                        Fill form
-                      </>
-                    )}
-                  </Button>
+        <AnimatePresence mode="wait" custom={tabDir} initial={false}>
+          <motion.div
+            key={tab}
+            className="tab-panel"
+            custom={tabDir}
+            variants={tabVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            {tab === 'home' && (
+              <>
+                <div className="engine-status">
+                  <span className={`status-badge ${serverUrlInput ? 'ok' : ''}`}>
+                    {serverUrlInput ? 'OCR: Unlimited-OCR server' : 'OCR: on-device (Tesseract)'}
+                  </span>
+                  <span className={`status-badge ${llmConfigured() ? 'llm' : ''}`}>
+                    {llmConfigured()
+                      ? `AI: ${llm.url.includes('google') ? 'Gemini' : 'configured'}`
+                      : 'AI: not set up'}
+                  </span>
                 </div>
-              ) : (
-                <>
-                  <div className={`camera-view ${streamActive ? 'active' : ''}`}>
-                    <video ref={videoRef} autoPlay playsInline muted />
-                    {!streamActive && (
-                      <div className="camera-idle">
-                        <div className="idle-camera-icon">
-                          <svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                            <circle cx="12" cy="13" r="4" />
-                          </svg>
-                        </div>
-                        <p>Camera is off</p>
-                        {cameraError && <p className="camera-error">{cameraError}</p>}
-                      </div>
-                    )}
-                    {streamActive && (
-                      <div className="viewfinder">
-                        <span className="corner tl" />
-                        <span className="corner tr" />
-                        <span className="corner bl" />
-                        <span className="corner br" />
-                        <span className="scan-line" />
-                      </div>
-                    )}
-                  </div>
 
-                  <div className="scanner-controls">
-                    {streamActive ? (
-                      <button className="shutter" onClick={capture} aria-label="Capture">
-                        <span />
-                      </button>
-                    ) : (
-                      <Button size="lg" onClick={startCamera}>
-                        Enable camera
-                      </Button>
-                    )}
-                    <button className="btn-upload" onClick={() => fileInputRef.current?.click()}>
-                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
-                      Image
-                    </button>
-                    <button className="btn-upload" onClick={() => pdfInputRef.current?.click()}>
-                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="16" y1="13" x2="8" y2="13" />
-                        <line x1="16" y1="17" x2="8" y2="17" />
-                      </svg>
-                      PDF
-                    </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleUpload}
-                      style={{ display: 'none' }}
-                    />
-                    <input
-                      ref={pdfInputRef}
-                      type="file"
-                      accept="application/pdf"
-                      onChange={handlePdfUpload}
-                      style={{ display: 'none' }}
-                    />
-                  </div>
-
-                  <p className="scanner-hint">
-                    {ocrBusy
-                      ? ocrStatus
-                      : streamActive
-                        ? 'Line up the document and tap the shutter'
-                        : 'Grant camera access, upload a photo, or a PDF to extract text'}
-                  </p>
-                </>
-              )}
-            </div>
-          </>
-        )}
-
-        {tab === 'scans' && (
-          <div className="library-page">
-            <div className="scan-toolbar">
-              <div className="search-box">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <input
-                  className="search-input"
-                  value={historySearch}
-                  onChange={(e) => setHistorySearch(e.target.value)}
-                  placeholder="Search scan text…"
+                <CaptureView
+                  videoRef={videoRef}
+                  fileInputRef={fileInputRef}
+                  pdfInputRef={pdfInputRef}
+                  streamActive={streamActive}
+                  cameraError={cameraError}
+                  captured={captured}
+                  ocrBusy={ocrBusy}
+                  fillBusy={fillBusy}
+                  fillStatus={fillStatus}
+                  ocrStatus={ocrStatus}
+                  onStartCamera={startCamera}
+                  onCapture={capture}
+                  onRetake={retake}
+                  onSaveScan={saveScan}
+                  onShareScan={shareScan}
+                  onCrop={() => setCropOpen(true)}
+                  onExtractText={extractFromCapture}
+                  onStartFill={startFill}
+                  onImageUpload={handleUpload}
+                  onPdfUpload={handlePdfUpload}
                 />
-              </div>
-              <div className="chip-row">
-                {[
-                  ['', 'All'],
-                  ['ocr', 'OCR only'],
-                  ['filled', 'Filled'],
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={historyStatus === value ? 'chip active' : 'chip'}
-                    onClick={() => setHistoryStatus(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-                <span className="chip-divider" />
-                {[
-                  ['', 'All'],
-                  ['image', 'Images'],
-                  ['pdf', 'PDFs'],
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={historyType === value ? 'chip active' : 'chip'}
-                    onClick={() => setHistoryType(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {filteredScans.length > 0 ? (
-              <div className="scan-grid">
-                {filteredScans.map((s) => scanCard(s))}
-              </div>
-            ) : (
-              emptyTab(
-                scans.length > 0 ? 'No matching scans' : 'Scans',
-                scans.length > 0
-                  ? 'Try a different search or filter'
-                  : 'Scan a document and it will be saved here'
-              )
+              </>
             )}
-          </div>
-        )}
 
-        {tab === 'history' && (
-          <div className="history-page">
-            {filteredScans.length > 0 ? (
-              <div className="history-list">
-                {groupHistory(filteredScans).map((group) => (
-                  <div key={group.label} className="history-group">
-                    <h3>{group.label}</h3>
-                    {group.items.map((s) => (
-                      <button key={s.id} className="history-item" onClick={() => setScanDetail(s)}>
-                        {s.preview_image ? (
-                          <img className="history-thumb" src={s.preview_image} alt="Scan preview" />
-                        ) : (
-                          <div className="history-thumb history-thumb-empty">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="3" y="3" width="18" height="18" rx="4" />
-                              <circle cx="9" cy="9" r="2" />
-                              <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
-                            </svg>
-                          </div>
-                        )}
-                        <div className="history-meta">
-                          <div className="history-top">
-                            <span className="history-title">
-                              {s.name || defaultScanName(s.created_at)}
-                            </span>
-                            {scanBadge(s)}
-                          </div>
-                          <span className="history-time">
-                            {fmtTime(s.created_at)} · {s.pages} page{s.pages === 1 ? '' : 's'}
-                            {s.ocr_engine === 'server' ? ' · server OCR' : ''}
-                            {s.ocr_engine === 'backend' ? ' · API OCR' : ''}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              emptyTab(
-                scans.length > 0 ? 'No matching activity' : 'History',
-                scans.length > 0
-                  ? 'Try a different search or filter'
-                  : 'Your scanning activity will be listed here'
-              )
+            {tab === 'scans' && (
+              <ScansLibrary
+                scans={scans}
+                filtered={filteredScans}
+                search={historySearch}
+                onSearch={setHistorySearch}
+                status={historyStatus}
+                onStatus={setHistoryStatus}
+                type={historyType}
+                onType={setHistoryType}
+                onSelect={(s) => setScanDetail(s)}
+                onDelete={deleteScan}
+                onNewScan={() => changeTab('home')}
+              />
             )}
-          </div>
-        )}
-        {tab === 'profile' && <ProfilePage showToast={showToast} onLogout={onLogout} />}
+
+            {tab === 'history' && (
+              <HistoryList
+                scans={scans}
+                filtered={filteredScans}
+                onSelect={(s) => setScanDetail(s)}
+                onNewScan={() => changeTab('home')}
+              />
+            )}
+
+            {tab === 'profile' && <ProfilePage showToast={showToast} onLogout={onLogout} />}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
-      {ocrResult && !ocrBusy && (
-        <Dialog open={!!ocrResult && !ocrBusy} onOpenChange={(o) => { if (!o) setOcrResult(null) }}>
-          <DialogContent className="wm-dialog">
-            <DialogHeader className="text-left">
-              <DialogTitle>Extracted text</DialogTitle>
-              {ocrResult.engine === 'backend' ? (
-                <span className="status-badge ok">
-                  OCR: Snappy API{ocrResult.pages > 1 ? ` · ${ocrResult.pages} pages` : ''}
-                </span>
-              ) : ocrResult.engine === 'server' ? (
-                <span className="status-badge ok">
-                  OCR: Unlimited-OCR server{ocrResult.pages > 1 ? ` · ${ocrResult.pages} pages` : ''}
-                </span>
-              ) : ocrResult.serverError ? (
-                <span className="status-badge warn">
-                  OCR: remote OCR failed — on-device fallback
-                </span>
-              ) : (
-                <span className="status-badge">
-                  OCR: on-device (Tesseract){ocrResult.pages > 1 ? ` · ${ocrResult.pages} pages` : ''}
-                </span>
-              )}
-            </DialogHeader>
-            <pre className="ocr-text">{ocrResult.text || 'No text found'}</pre>
-            <div className="wm-dialog-actions">
-              <Button variant="secondary" onClick={copyText}>Copy</Button>
-              <Button onClick={downloadText}>Download .txt</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      {ocrResult && (
+        <OcrResultDialog
+          result={ocrResult}
+          onClose={() => setOcrResult(null)}
+          onCopy={copyText}
+          onDownload={downloadText}
+        />
       )}
 
-      {reviewOpen && analysis && (
-        <Dialog open={reviewOpen && !!analysis} onOpenChange={(o) => { if (!o) closeFillFlow() }}>
-          <DialogContent className="wm-dialog">
-            <DialogHeader className="text-left">
-              <DialogTitle>Review fills</DialogTitle>
-              <p className="engine-badge">
-                {analysis.fields.length} field{analysis.fields.length === 1 ? '' : 's'} found
-              </p>
-              <div className="badge-row">
-                {analysis.structureEngine === 'llm' ? (
-                  <span className="status-badge llm">Fields: AI vision</span>
-                ) : analysis.structureEngine === 'server' ? (
-                  <span className="status-badge ok">Fields: OCR server</span>
-                ) : (
-                  <span className="status-badge">Fields: on-device OCR</span>
-                )}
-                {analysis.matchSource === 'llm' ? (
-                  <span className="status-badge llm">Values: AI matching</span>
-                ) : (
-                  <span className="status-badge warn">Values: keyword matching</span>
-                )}
-              </div>
-            </DialogHeader>
-            <div className="review-list">
-              {edits.map((d) => {
-                const field = analysis.fields.find((f) => f.id === d.fieldId)
-                if (!field) return null
-                if (field.kind === 'checkbox' && field.group) {
-                  const groupFields = edits.filter((x) => {
-                    const f = analysis.fields.find((y) => y.id === x.fieldId)
-                    return f?.kind === 'checkbox' && f.group === field.group
-                  })
-                  if (groupFields[0]?.fieldId !== d.fieldId) return null
-                  const anyChecked = groupFields.some((x) => x.include && x.checked)
-                  const groupIncluded = groupFields.some((x) => x.include)
-                  return (
-                    <div key={field.group} className="review-group-block">
-                      <div className="review-group-head">
-                        <p className="review-group">{field.group}</p>
-                        <Switch
-                          size="sm"
-                          checked={groupIncluded}
-                          onCheckedChange={(c) => {
-                            setEdits((prev) =>
-                              prev.map((x) => {
-                                const f2 = analysis.fields.find((y) => y.id === x.fieldId)
-                                if (f2?.group !== field.group) return x
-                                return { ...x, include: c }
-                              })
-                            )
-                          }}
-                        />
-                      </div>
-                      <div className="option-pills">
-                        {groupFields.map((gd) => {
-                          const gf = analysis.fields.find((y) => y.id === gd.fieldId)
-                          return (
-                            <button
-                              key={gd.fieldId}
-                              type="button"
-                              className={`option-pill ${gd.include && gd.checked ? 'selected' : ''} ${!gd.include ? 'muted' : ''}`}
-                              onClick={() => selectGroupOption(field.group!, gd.fieldId)}
-                            >
-                              {gf?.label || 'Option'}
-                            </button>
-                          )
-                        })}
-                        <button
-                          type="button"
-                          className={`option-pill none ${!anyChecked && groupIncluded ? 'selected' : ''}`}
-                          onClick={() => selectGroupOption(field.group!, null)}
-                        >
-                          None
-                        </button>
-                      </div>
-                    </div>
-                  )
-                }
-                return (
-                  <div key={d.fieldId} className={`review-row ${d.include ? '' : 'disabled'}`}>
-                    <div className="review-main">
-                      <p className="review-label">
-                        {field.label || 'Unlabeled field'}
-                        {d.confidence === 0 && !d.value && (
-                          <span className="review-nomatch">
-                            {field.kind === 'checkbox'
-                              ? 'not matched — tick manually'
-                              : 'no match — type manually'}
-                          </span>
-                        )}
-                      </p>
-                      {field.kind === 'checkbox' ? (
-                        <label className="review-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={d.include && d.checked}
-                            disabled={!d.include}
-                            onChange={(e) => updateEdit(d.fieldId, { checked: e.target.checked })}
-                          />
-                          <span>{d.include ? (d.checked ? 'Checked' : 'Unchecked') : 'Skipped'}</span>
-                        </label>
-                      ) : field.kind === 'date' ? (
-                        <input
-                          className="review-input"
-                          type="date"
-                          value={d.value}
-                          disabled={!d.include}
-                          onChange={(e) => updateEdit(d.fieldId, { value: e.target.value })}
-                        />
-                      ) : (
-                        (() => {
-                          const suggestions = suggestOptions(field, loadProfile(), field.options)
-                          if (suggestions.length === 0) {
-                            return (
-                              <input
-                                className="review-input"
-                                type="text"
-                                value={d.value}
-                                disabled={!d.include}
-                                placeholder="Type a value to fill"
-                                onChange={(e) => updateEdit(d.fieldId, { value: e.target.value })}
-                              />
-                            )
-                          }
-                          const known = suggestions.includes(d.value)
-                          return (
-                            <div className="review-suggest">
-                              <select
-                                className="review-select"
-                                disabled={!d.include}
-                                value={known ? d.value : '__custom__'}
-                                onChange={(e) => {
-                                  const v = e.target.value
-                                  if (v !== '__custom__') {
-                                    updateEdit(d.fieldId, { value: v })
-                                  }
-                                }}
-                              >
-                                <option value="__custom__">Choose or type your own…</option>
-                                {suggestions.map((o) => (
-                                  <option key={o} value={o}>{o}</option>
-                                ))}
-                              </select>
-                              <input
-                                className="review-input"
-                                type="text"
-                                value={d.value}
-                                disabled={!d.include}
-                                placeholder={known ? 'Custom value…' : 'Type a value to fill'}
-                                onChange={(e) => updateEdit(d.fieldId, { value: e.target.value })}
-                              />
-                            </div>
-                          )
-                        })()
-                      )}
-                    </div>
-                    <Switch
-                      size="sm"
-                      checked={d.include}
-                      onCheckedChange={(c) => updateEdit(d.fieldId, { include: c })}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-            <div className="wm-dialog-actions">
-              <Button variant="secondary" onClick={closeFillFlow}>Cancel</Button>
-              <Button onClick={applyFill}>Apply & render</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      {analysis && !resultOpen && (
+        <ReviewFillsDialog
+          analysis={analysis}
+          edits={edits}
+          onUpdateEdit={updateEdit}
+          onSelectGroupOption={selectGroupOption}
+          onToggleGroup={toggleGroup}
+          onCancel={closeFillFlow}
+          onApply={applyFill}
+        />
       )}
 
       {resultOpen && filledImage && (
-        <Dialog open={resultOpen && !!filledImage} onOpenChange={(o) => { if (!o) closeFillFlow() }}>
-          <DialogContent className="wm-dialog">
-            <DialogHeader className="text-left">
-              <DialogTitle>Filled form</DialogTitle>
-              <p className="engine-badge">Compared with the original scan</p>
-              <div className="badge-row">
-                {analysis?.matchSource === 'llm' ? (
-                  <span className="status-badge llm">Values: AI matching</span>
-                ) : (
-                  <span className="status-badge warn">Values: keyword matching</span>
-                )}
-              </div>
-            </DialogHeader>
-            <div className="fill-compare">
-              <div className="fill-col">
-                <span>Original</span>
-                <ZoomableImage
-                  src={captured ?? ''}
-                  alt="Original form"
-                  onClick={() => {
-                    if (!captured || !filledImage) return
-                    openFullscreenImage({
-                      originalSrc: captured,
-                      originalAlt: 'Original form',
-                      filledSrc: filledImage,
-                      filledAlt: 'Filled form',
-                      title: 'Form preview',
-                      subtitle: 'Inspect the original and filled versions side by side',
-                    })
-                  }}
-                />
-              </div>
-              <div className="fill-col">
-                <span>Filled</span>
-                <ZoomableImage
-                  src={filledImage ?? ''}
-                  alt="Filled form"
-                  onClick={() => {
-                    if (!captured || !filledImage) return
-                    openFullscreenImage({
-                      originalSrc: captured,
-                      originalAlt: 'Original form',
-                      filledSrc: filledImage,
-                      filledAlt: 'Filled form',
-                      title: 'Form preview',
-                      subtitle: 'Inspect the original and filled versions side by side',
-                    })
-                  }}
-                />
-              </div>
-            </div>
-            <p className="zoom-hint">Scroll to zoom · drag to pan · double-click to toggle 2×</p>
-            {fillSkipped.length > 0 && (
-              <p className="fill-skip-note">
-                Skipped {fillSkipped.length} field{fillSkipped.length === 1 ? '' : 's'} (no clean
-                blank space to write in): {fillSkipped.join(', ')}
-              </p>
-            )}
-            <div className="wm-dialog-actions">
-              <Button variant="secondary" onClick={closeFillFlow}>Done</Button>
-              <Button variant="secondary" onClick={shareFilled}>Share</Button>
-              <Button variant="secondary" onClick={saveFilled}>Download</Button>
-              <Button onClick={saveFilledToHistory} disabled={filledSaved || fillBusy}>
-                {filledSaved ? 'Saved ✓' : fillBusy ? <span className="spinner" /> : 'Save to history'}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <FillResultDialog
+          analysis={analysis}
+          originalSrc={captured ?? ''}
+          filledImage={filledImage}
+          fillSkipped={fillSkipped}
+          filledSaved={filledSaved}
+          fillBusy={fillBusy}
+          onClose={closeFillFlow}
+          onShare={async () => {
+            if (!filledImage) return
+            const blob = await (await fetch(filledImage)).blob()
+            const file = new File([blob], 'filled-form.jpg', { type: 'image/jpeg' })
+            if (navigator.share) {
+              try {
+                await navigator.share({ files: [file], title: 'Snappy filled form' })
+              } catch {
+                /* user cancelled */
+              }
+            } else {
+              try {
+                await navigator.clipboard.writeText(filledImage)
+                showToast('Image copied to clipboard')
+              } catch {
+                showToast('Sharing not supported on this device')
+              }
+            }
+          }}
+          onDownload={() => {
+            if (!filledImage) return
+            downloadImage(filledImage, `snappy-filled-${Date.now()}.jpg`)
+            showToast('Filled form saved')
+          }}
+          onSaveToHistory={saveFilledToHistory}
+          onInspect={
+            captured && filledImage
+              ? () =>
+                  openFullscreenImage({
+                    originalSrc: captured,
+                    originalAlt: 'Original form',
+                    filledSrc: filledImage,
+                    filledAlt: 'Filled form',
+                    title: 'Form preview',
+                    subtitle: 'Inspect the original and filled versions side by side',
+                  })
+              : undefined
+          }
+        />
       )}
 
       {scanDetail && (
-        <Dialog open={!!scanDetail} onOpenChange={(o) => { if (!o) setScanDetail(null) }}>
-          <DialogContent className="wm-dialog">
-            <div className="detail-title-block">
-              <Input
-                className="detail-name-input w-full border-transparent bg-transparent px-0 text-lg font-semibold"
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onBlur={() => {
-                  const trimmed = nameDraft.trim()
-                  if (trimmed && trimmed !== scanDetail.name) {
-                    renameScan(scanDetail.id, trimmed)
-                  } else if (!trimmed) {
-                    setNameDraft(scanDetail.name)
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                }}
-                aria-label="Scan name"
-              />
-              <div className="badge-row">
-                {scanBadge(scanDetail)}
-                <span className="status-badge ok">
-                  {scanDetail.scan_type === 'pdf' ? 'PDF' : 'Image'} · {scanDetail.source}
-                </span>
-              </div>
-            </div>
-            <p className="detail-date">
-              {fmtDate(scanDetail.created_at)} · {fmtTime(scanDetail.created_at)}
-              {scanDetail.pages > 1 ? ` · ${scanDetail.pages} pages` : ''}
-            </p>
-            <div className="fill-compare">
-              <div className="fill-col">
-                <span>Original (unfilled)</span>
-                <ZoomableImage
-                  src={scanDetail.preview_image}
-                  alt="Original scan"
-                  onClick={() => {
-                    if (!scanDetail.filled_image) return
-                    openFullscreenImage({
-                      originalSrc: scanDetail.preview_image,
-                      originalAlt: 'Original scan',
-                      filledSrc: scanDetail.filled_image,
-                      filledAlt: 'Filled form',
-                      title: scanDetail.name,
-                      subtitle: 'Inspect the scan and filled result in full screen',
-                    })
-                  }}
-                />
-              </div>
-              {scanDetail.filled_image ? (
-                <div className="fill-col">
-                  <span>Filled</span>
-                  <ZoomableImage
-                    src={scanDetail.filled_image}
-                    alt="Filled form"
-                    onClick={() => {
-                      openFullscreenImage({
-                        originalSrc: scanDetail.preview_image,
-                        originalAlt: 'Original scan',
-                        filledSrc: scanDetail.filled_image,
-                        filledAlt: 'Filled form',
-                        title: scanDetail.name,
-                        subtitle: 'Inspect the scan and filled result in full screen',
-                      })
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="fill-col">
-                  <span>Filled</span>
-                  <div className="detail-no-filled">
-                    <p>No filled version yet.</p>
-                    <p>Scan again and tap “Fill form”, then “Save to history”.</p>
-                  </div>
-                </div>
-              )}
-            </div>
-            <p className="zoom-hint">Scroll to zoom · drag to pan · double-click to toggle 2×</p>
-            {scanDetail.ocr_text && (
-              <pre className="ocr-text detail-text">{scanDetail.ocr_text}</pre>
-            )}
-            <div className="wm-dialog-actions">
-              <Button
-                variant="destructive"
-                onClick={() => deleteScan(scanDetail.id)}
-              >
-                Delete
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => downloadImage(scanDetail.preview_image, `snappy-scan-${scanDetail.id}.jpg`)}
-              >
-                Download original
-              </Button>
-              {scanDetail.filled_image && (
-                <Button
-                  onClick={() => downloadImage(scanDetail.filled_image, `snappy-filled-${scanDetail.id}.jpg`)}
-                >
-                  Download filled
-                </Button>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ScanDetailDialog
+          scan={scanDetail}
+          nameDraft={nameDraft}
+          onNameDraft={setNameDraft}
+          onRename={renameScan}
+          onDelete={deleteScan}
+          onDownloadImage={downloadImage}
+          onClose={() => setScanDetail(null)}
+          onInspect={
+            scanDetail.filled_image
+              ? () =>
+                  openFullscreenImage({
+                    originalSrc: scanDetail.preview_image,
+                    originalAlt: 'Original scan',
+                    filledSrc: scanDetail.filled_image,
+                    filledAlt: 'Filled form',
+                    title: scanDetail.name,
+                    subtitle: 'Inspect the scan and filled result in full screen',
+                  })
+              : undefined
+          }
+        />
       )}
 
       {cropOpen && captured && (
@@ -1331,189 +798,32 @@ export default function HomePage({ onLogout }: HomePageProps) {
       )}
 
       {settingsOpen && (
-        <Dialog open={settingsOpen} onOpenChange={(o) => { if (!o) setSettingsOpen(false) }}>
-          <DialogContent className="wm-dialog">
-            <DialogHeader className="text-left">
-              <DialogTitle>OCR settings</DialogTitle>
-              <p className="engine-badge">
-                Engine: {engine === 'server' ? 'Unlimited-OCR server' : 'On-device (Tesseract)'}
-              </p>
-            </DialogHeader>
-            <div className="settings-field">
-              <label htmlFor="ocr-url">OCR server URL (vLLM / SGLang)</label>
-              <Input
-                id="ocr-url"
-                value={serverUrlInput}
-                onChange={(e) => setServerUrlInput(e.target.value)}
-                placeholder="http://192.168.1.50:8000"
-                inputMode="url"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <p className="settings-hint">
-                Point to a server running baidu/Unlimited-OCR (served as{' '}
-                <code>Unlimited-OCR</code>). Leave empty to always use on-device OCR.
-              </p>
-              <Input
-                value={serverKeyInput}
-                onChange={(e) => setServerKeyInput(e.target.value)}
-                placeholder="API key (optional, sent as Bearer token)"
-                type="password"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <div className="model-picker">
-                <Button
-                  variant="secondary"
-                  className="btn-test"
-                  onClick={testOcr}
-                  disabled={ocrTesting || !serverUrlInput.trim()}
-                >
-                  {ocrTesting ? <span className="spinner" /> : 'Test connection'}
-                </Button>
-                {ocrTestMsg && (
-                  <span className={`llm-test-msg ${ocrTestOk ? 'ok' : 'fail'}`}>
-                    {ocrTestMsg}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="settings-divider" />
-            <div className="settings-field">
-              <label htmlFor="llm-url">AI assistant (OpenAI-compatible)</label>
-              <Input
-                id="llm-url"
-                value={llm.url}
-                onChange={(e) => setLlm({ ...llm, url: e.target.value })}
-                placeholder="https://api.openai.com/v1"
-                inputMode="url"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <Input
-                value={llm.apiKey}
-                onChange={(e) => setLlm({ ...llm, apiKey: e.target.value })}
-                placeholder="API key (stored on this device)"
-                type="password"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <Input
-                value={llm.model}
-                onChange={(e) => setLlm({ ...llm, model: e.target.value })}
-                placeholder="Model, e.g. gpt-4o-mini"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <div className="model-picker">
-                <Button
-                  variant="secondary"
-                  className="btn-test"
-                  onClick={loadModels}
-                  disabled={modelsLoading || !llm.url.trim()}
-                >
-                  {modelsLoading ? <span className="spinner" /> : 'List available models'}
-                </Button>
-                {modelsError && <p className="llm-test-msg fail">{modelsError}</p>}
-                {modelOptions.length > 0 && (
-                  <select
-                    className="model-select"
-                    value={llm.model}
-                    onChange={(e) => setLlm({ ...llm, model: e.target.value })}
-                  >
-                    <option value="">Choose a model…</option>
-                    {modelOptions.map((id) => (
-                      <option key={id} value={id}>
-                        {id}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-              <div className="switch-inline flex items-center">
-                <Switch
-                  checked={llm.vision}
-                  onCheckedChange={(c) => setLlm({ ...llm, vision: c })}
-                />
-                <p className="settings-hint">Vision-capable (can read the form image directly)</p>
-              </div>
-              <p className="settings-hint">
-                Used to understand the form and choose values. Falls back to keyword
-                matching when empty or unreachable.
-              </p>
-              <div className="llm-test-row">
-                <Button
-                  variant="secondary"
-                  className="btn-test"
-                  onClick={testLlm}
-                  disabled={llmTesting || !llm.url.trim()}
-                >
-                  {llmTesting ? <span className="spinner" /> : 'Test connection'}
-                </Button>
-                {llmTestMsg && (
-                  <span className={`llm-test-msg ${llmTestOk ? 'ok' : 'fail'}`}>
-                    {llmTestMsg}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="wm-dialog-actions">
-              <Button onClick={saveSettings}>Save</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <EngineSettingsDialog
+          serverUrl={serverUrlInput}
+          onServerUrl={setServerUrlInput}
+          serverKey={serverKeyInput}
+          onServerKey={setServerKeyInput}
+          llm={llm}
+          onLlm={setLlm}
+          modelOptions={modelOptions}
+          modelsLoading={modelsLoading}
+          modelsError={modelsError}
+          onLoadModels={loadModels}
+          ocrTesting={ocrTesting}
+          ocrTestOk={ocrTestOk}
+          ocrTestMsg={ocrTestMsg}
+          onTestOcr={testOcr}
+          llmTesting={llmTesting}
+          llmTestOk={llmTestOk}
+          llmTestMsg={llmTestMsg}
+          onTestLlm={testLlm}
+          engineLabel={engine === 'server' ? 'Unlimited-OCR server' : 'On-device (Tesseract)'}
+          onClose={() => setSettingsOpen(false)}
+          onSave={saveSettings}
+        />
       )}
 
-      <nav className="tab-bar">
-        {(
-          [
-            ['home', 'Home'],
-            ['scans', 'Scans'],
-            ['history', 'History'],
-            ['profile', 'Profile'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            className={tab === key ? 'tab-item active' : 'tab-item'}
-            onClick={() => setTab(key)}
-          >
-            <span className="tab-icon">
-              {key === 'home' && (
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-              )}
-              {key === 'scans' && (
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="4" />
-                  <circle cx="9" cy="9" r="2" />
-                  <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
-                </svg>
-              )}
-              {key === 'history' && (
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-              )}
-              {key === 'profile' && (
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              )}
-            </span>
-            <span className="tab-label">{label}</span>
-          </button>
-        ))}
-      </nav>
+      <TabBar tab={tab} onTabChange={changeTab} />
     </div>
   )
 }

@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* ============================================================
+   SNAPPY DESIGN TOKENS — "Paper & Ink"
+   Warm paper neutrals · deep scanner-teal accent
+   Display: Space Grotesk · Body: IBM Plex Sans · Mono: IBM Plex Mono
+   ============================================================ */
+
 @theme inline {
   --color-background: var(--bg);
   --color-foreground: var(--text);
@@ -8,16 +14,36 @@
   --color-card-foreground: var(--text);
   --color-primary: var(--accent);
   --color-primary-foreground: #ffffff;
-  --color-secondary: #f1f5f9;
+  --color-secondary: var(--bg-soft);
   --color-secondary-foreground: var(--text);
-  --color-muted: #f1f2f3;
+  --color-muted: var(--bg-soft);
   --color-muted-foreground: var(--text-muted);
   --color-accent: var(--accent);
   --color-accent-foreground: #ffffff;
+  --color-accent-strong: var(--accent-strong);
   --color-destructive: var(--danger);
   --color-border: var(--border);
-  --color-input: var(--border);
+  --color-input: var(--border-strong);
   --color-ring: var(--accent);
+
+  --font-display: 'Space Grotesk', var(--sans);
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+/* Motion language — one shared physical easing set */
+:root {
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);      /* decelerate, natural settle */
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.44, 1);      /* gentle overshoot */
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);         /* iOS sheet feel */
+  --dur-fast: 150ms;
+  --dur-med: 220ms;
+  --dur-slow: 320ms;
 }
 
 .wm-dialog {
@@ -28,10 +54,13 @@
   width: 100% !important;
   max-width: 430px !important;
   max-height: 92dvh;
-  border-radius: 20px 20px 0 0 !important;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
   border-color: var(--border) !important;
-  background: #ffffff !important;
-  box-shadow: 0 -8px 40px rgba(15, 23, 42, 0.14), 0 24px 60px rgba(15, 23, 42, 0.18) !important;
+  background: var(--surface) !important;
+  box-shadow:
+    0 -1px 0 rgba(28, 25, 23, 0.05),
+    0 -8px 40px rgba(28, 25, 23, 0.10),
+    0 24px 60px rgba(28, 25, 23, 0.16) !important;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)) !important;
@@ -44,16 +73,16 @@
   height: 5px;
   margin: -4px auto 8px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.12);
+  background: rgba(28, 25, 23, 0.14);
   flex-shrink: 0;
 }
 
 .wm-dialog[data-state='open'] {
-  animation: wm-sheet-in 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  animation: wm-sheet-in var(--dur-slow) var(--ease-sheet);
 }
 
 .wm-dialog[data-state='closed'] {
-  animation: wm-sheet-out 0.22s ease-in forwards;
+  animation: wm-sheet-out var(--dur-fast) ease-in forwards;
 }
 
 @keyframes wm-sheet-in {
@@ -80,11 +109,13 @@
     bottom: auto !important;
     translate: -50% -50% !important;
     width: calc(100% - 32px) !important;
-    max-width: 430px !important;
+    max-width: 460px !important;
     max-height: 85dvh;
-    border-radius: 18px !important;
+    border-radius: var(--radius-lg) !important;
     padding-bottom: 1.5rem !important;
-    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18) !important;
+    box-shadow:
+      0 1px 0 rgba(28, 25, 23, 0.04),
+      0 24px 60px rgba(28, 25, 23, 0.18) !important;
   }
 
   .wm-dialog::before {
@@ -92,21 +123,21 @@
   }
 
   .wm-dialog[data-state='open'] {
-    animation: wm-zoom-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: wm-zoom-in var(--dur-slow) var(--ease-spring);
   }
 
   .wm-dialog[data-state='closed'] {
-    animation: wm-zoom-out 0.15s ease-in forwards;
+    animation: wm-zoom-out 140ms ease-in forwards;
   }
 }
 
 @keyframes wm-zoom-in {
   from {
-    transform: scale(0.95);
+    transform: scale(0.92) translateY(8px);
     opacity: 0;
   }
   to {
-    transform: scale(1);
+    transform: scale(1) translateY(0);
     opacity: 1;
   }
 }
