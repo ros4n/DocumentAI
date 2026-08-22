@@ -18,33 +18,58 @@ import type { BoundingBox, DetectedField, FieldDetectionResult } from '../types'
 
 type Cv = any
 
+/**
+ * OpenCV.js is loaded at runtime from the official hosted WASM build — the
+ * same lazy pattern Tesseract.js uses for its worker/wasm assets. Loading via
+ * script tag (rather than an npm CJS package) avoids bundler interop issues
+ * with the 15MB UMD file and keeps it out of the app bundle entirely.
+ */
+const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js'
+
 let cvPromise: Promise<Cv> | null = null
+
+function loadScriptOnce(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      `script[src="${src}"]`
+    )
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('error', () => reject(new Error('OpenCV.js failed to load')), { once: true })
+      if (existing.dataset.loaded === '1') resolve()
+      return
+    }
+    const script = document.createElement('script')
+    script.src = src
+    script.async = true
+    script.onload = () => {
+      script.dataset.loaded = '1'
+      resolve()
+    }
+    script.onerror = () => reject(new Error('OpenCV.js failed to load'))
+    document.head.appendChild(script)
+  })
+}
 
 async function loadCv(): Promise<Cv> {
   if (!cvPromise) {
     cvPromise = (async () => {
-      const mod: any = await import('@techstark/opencv-js')
-      const cv: Cv = mod.default ?? mod
-      // WASM runtime may still be initializing — hook + poll, capped at 10s
-      if (cv && typeof cv.Mat === 'function') return cv
-      await new Promise<void>((resolve, reject) => {
-        const started = Date.now()
-        const tick = () => {
-          if (cv && typeof cv.Mat === 'function') resolve()
-          else if (Date.now() - started > 10000) reject(new Error('OpenCV.js failed to initialize'))
-          else window.setTimeout(tick, 60)
+      const w = window as any
+      if (w.cv && typeof w.cv.Mat === 'function') return w.cv
+      await loadScriptOnce(OPENCV_CDN_URL)
+      // The WASM runtime initializes asynchronously after the script loads;
+      // window.cv gains Mat once ready. Poll, capped at 30s for slow devices.
+      const started = Date.now()
+      while (!(w.cv && typeof w.cv.Mat === 'function')) {
+        if (Date.now() - started > 30000) {
+          throw new Error('OpenCV.js failed to initialize')
         }
-        try {
-          cv.onRuntimeInitialized = () => resolve()
-        } catch {
-          /* polling handles it */
-        }
-        window.setTimeout(tick, 60)
-      })
-      return cv
+        await new Promise((r) => window.setTimeout(r, 80))
+      }
+      return w.cv as Cv
     })()
     cvPromise.catch(() => {
-      cvPromise = null
+      cvPromise = null // allow retry on next Tier-2 invocation
     })
   }
   return cvPromise
