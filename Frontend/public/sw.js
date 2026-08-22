@@ -1,5 +1,5 @@
-const CACHE_NAME = 'snappy-v3'
-const RUNTIME_CACHE = 'snappy-runtime-v3'
+const CACHE_NAME = 'snappy-v4'
+const RUNTIME_CACHE = 'snappy-runtime-v4'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -43,14 +43,18 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
 
-  // Cache-first for engine assets on third-party CDNs
+  // Cache-first for engine assets on third-party CDNs.
+  // IMPORTANT: opaque responses (no-cors) must never be replayed to
+  // cors-mode requests, and caching them poisons the cache for the page's
+  // streaming fetches — so only non-opaque responses are stored/replayed.
   if (ENGINE_HOSTS.includes(url.hostname)) {
     event.respondWith(
       caches.open(RUNTIME_CACHE).then((cache) =>
         cache.match(request).then((cached) => {
-          if (cached) return cached
+          const usable = cached && cached.type !== 'opaque'
+          if (usable) return cached
           return fetch(request).then((response) => {
-            if (response && (response.ok || response.type === 'opaque')) {
+            if (response && response.type !== 'opaque') {
               cache.put(request, response.clone())
             }
             return response

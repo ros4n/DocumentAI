@@ -21,18 +21,20 @@ type Cv = any
 /**
  * OpenCV.js is loaded at runtime — same lazy pattern as Tesseract.js.
  * Sources are tried in order:
- *   1. jsDelivr (global edge CDN, CORS-enabled → real download progress)
- *   2. docs.opencv.org (official host; no CORS → falls back to plain <script>)
+ *   1. Same-origin `/vendor/opencv.js` (self-hosted, verified build;
+ *      no CORS, no CDN variance → streaming progress always works)
+ *   2. jsDelivr (edge CDN, CORS-enabled)
+ *   3. docs.opencv.org (official host)
  * The service worker caches whichever source succeeds, so this cost is
  * paid once per device.
  */
 const OPENCV_SOURCES = [
+  '/vendor/opencv.js',
   'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js',
   'https://docs.opencv.org/4.9.0/opencv.js',
 ]
 
-/** Hard ceiling for the entire engine load — nothing may hang silently. */
-const LOAD_DEADLINE_MS = 150_000
+/** Hard ceiling for a single source attempt's init phase */
 const INIT_TIMEOUT_MS = 45_000
 
 let cvPromise: Promise<Cv> | null = null
@@ -54,60 +56,50 @@ async function attemptSource(
   w: any,
   onStage?: (message: string) => void
 ): Promise<void> {
-  let objectUrl: string | null = null
+  onStage?.('Downloading on-device engine…')
+
+  // Warm the browser HTTP cache with live progress. The <script> tag below
+  // re-requests the SAME url and is served instantly from that cache —
+  // injecting the original src directly keeps Emscripten resource resolution
+  // intact (blob/object URLs break some builds).
   try {
-    let scriptUrl = src
-    try {
-      onStage?.('Downloading on-device engine…')
-      const res = await fetch(src)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const total = Number(res.headers.get('Content-Length') ?? 0)
-      if (res.body) {
-        const reader = res.body.getReader()
-        const chunks: Uint8Array[] = []
-        let received = 0
-        let lastMsg = ''
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          chunks.push(value)
-          received += value.byteLength
-          // Content-Length may be compressed size while the reader yields
-          // decompressed bytes — clamp so % never exceeds 99 before done.
-          const msg =
-            total > 0
-              ? `Downloading on-device engine · ${Math.min(99, Math.floor((received / total) * 100))}%`
-              : `Downloading on-device engine · ${(received / 1048576).toFixed(1)} MB`
-          if (msg !== lastMsg) {
-            lastMsg = msg
-            onStage?.(msg)
-          }
+    const res = await fetch(src)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const total = Number(res.headers.get('Content-Length') ?? 0)
+    if (res.body) {
+      const reader = res.body.getReader()
+      let received = 0
+      let lastMsg = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        received += value.byteLength
+        // Content-Length may be compressed size while the reader yields
+        // decompressed bytes — clamp so % never exceeds 99 before done.
+        const msg =
+          total > 0
+            ? `Downloading on-device engine · ${Math.min(99, Math.floor((received / total) * 100))}%`
+            : `Downloading on-device engine · ${(received / 1048576).toFixed(1)} MB`
+        if (msg !== lastMsg) {
+          lastMsg = msg
+          onStage?.(msg)
         }
-        onStage?.('Starting vision engine…')
-        const blob = new Blob(chunks as BlobPart[], {
-          type: 'application/javascript',
-        })
-        objectUrl = URL.createObjectURL(blob)
-        scriptUrl = objectUrl
       }
-    } catch {
-      // Streaming unavailable (CORS/network) — plain script tag still works,
-      // just without byte-level progress.
-      onStage?.('Downloading on-device engine…')
     }
+  } catch {
+    /* warming is best-effort — the direct script tag may still succeed */
+  }
 
-    await injectScript(scriptUrl)
+  onStage?.('Starting vision engine…')
+  await injectScript(src)
 
-    // WASM runtime initializes asynchronously after evaluation
-    const started = Date.now()
-    while (!(w.cv && typeof w.cv.Mat === 'function')) {
-      if (Date.now() - started > INIT_TIMEOUT_MS) {
-        throw new Error('OpenCV.js failed to initialize')
-      }
-      await new Promise((r) => window.setTimeout(r, 80))
+  // WASM runtime initializes asynchronously after evaluation
+  const started = Date.now()
+  while (!(w.cv && typeof w.cv.Mat === 'function')) {
+    if (Date.now() - started > INIT_TIMEOUT_MS) {
+      throw new Error('OpenCV.js failed to initialize')
     }
-  } finally {
-    if (objectUrl) URL.revokeObjectURL(objectUrl)
+    await new Promise((r) => window.setTimeout(r, 80))
   }
 }
 
@@ -117,38 +109,17 @@ async function loadCv(onStage?: (message: string) => void): Promise<Cv> {
       const w = window as any
       if (w.cv && typeof w.cv.Mat === 'function') return w.cv
 
-      const attempt = async () => {
-        for (const src of OPENCV_SOURCES) {
-          try {
-            await attemptSource(src, w, onStage)
-            return
-          } catch (err) {
-            console.warn(`OpenCV source failed (${src})`, err)
-          }
+      for (const src of OPENCV_SOURCES) {
+        try {
+          await attemptSource(src, w, onStage)
+          return w.cv as Cv
+        } catch (err) {
+          console.warn(`OpenCV source failed (${src})`, err)
         }
-        throw new Error(
-          'Could not load the on-device vision engine. Check your connection and try again.'
-        )
       }
-
-      // Overall deadline: even a stalled connection resolves to an error
-      const withDeadline = Promise.race([
-        attempt(),
-        new Promise<never>((_, reject) =>
-          window.setTimeout(
-            () => reject(new Error('On-device engine took too long to load')),
-            LOAD_DEADLINE_MS
-          )
-        ),
-      ])
-
-      try {
-        await withDeadline
-      } catch (err) {
-        cvPromise = null // allow a clean retry next time
-        throw err
-      }
-      return w.cv as Cv
+      throw new Error(
+        'Could not load the on-device vision engine. Check your connection and try again.'
+      )
     })()
     cvPromise.catch(() => {
       cvPromise = null // allow retry on next Tier-2 invocation
