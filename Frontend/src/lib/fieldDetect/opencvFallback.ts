@@ -55,7 +55,7 @@ async function attemptSource(
   src: string,
   w: any,
   onStage?: (message: string) => void
-): Promise<void> {
+): Promise<Cv> {
   onStage?.('Downloading on-device engine…')
 
   // Warm the browser HTTP cache with live progress. The <script> tag below
@@ -93,26 +93,59 @@ async function attemptSource(
   onStage?.('Starting vision engine…')
   await injectScript(src)
 
-  // WASM runtime initializes asynchronously after evaluation
-  const started = Date.now()
-  while (!(w.cv && typeof w.cv.Mat === 'function')) {
-    if (Date.now() - started > INIT_TIMEOUT_MS) {
-      throw new Error('OpenCV.js failed to initialize')
+  /* ── Readiness ──────────────────────────────────────────────────────
+   * This Emscripten build's UMD factory returns a PROMISE when WASM isn't
+   * compiled yet (`moduleRtn = new Promise(...)`), so window.cv is a
+   * thenable — NOT a plain module with .Mat attached. Await it; fall back
+   * to polling only if some other build exposes a plain object. */
+  const deadline = Date.now() + INIT_TIMEOUT_MS
+
+  while (!w.cv) {
+    if (Date.now() > deadline) throw new Error('OpenCV.js never attached to window')
+    await new Promise((r) => window.setTimeout(r, 50))
+  }
+
+  let cv: any = w.cv
+  if (cv && typeof cv.then === 'function') {
+    // Thenable build — race against the init deadline
+    cv = await Promise.race([
+      cv,
+      new Promise<never>((_, reject) =>
+        window.setTimeout(
+          () => reject(new Error('OpenCV.js WASM initialization timed out')),
+          Math.max(1000, deadline - Date.now())
+        )
+      ),
+    ])
+  }
+
+  while (!(cv && typeof cv.Mat === 'function')) {
+    if (Date.now() > deadline) {
+      throw new Error('OpenCV.js loaded but its API never initialized')
     }
     await new Promise((r) => window.setTimeout(r, 80))
   }
+
+  return cv as Cv
 }
 
+let cvResolved: Cv | null = null
+
 async function loadCv(onStage?: (message: string) => void): Promise<Cv> {
+  if (cvResolved) return cvResolved
   if (!cvPromise) {
     cvPromise = (async () => {
       const w = window as any
-      if (w.cv && typeof w.cv.Mat === 'function') return w.cv
+      if (w.cv && typeof w.cv.Mat === 'function') {
+        cvResolved = w.cv as Cv
+        return cvResolved
+      }
 
       for (const src of OPENCV_SOURCES) {
         try {
-          await attemptSource(src, w, onStage)
-          return w.cv as Cv
+          const cv = await attemptSource(src, w, onStage)
+          cvResolved = cv
+          return cvResolved
         } catch (err) {
           console.warn(`OpenCV source failed (${src})`, err)
         }
