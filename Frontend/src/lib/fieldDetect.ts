@@ -100,7 +100,11 @@ export async function detectFieldsWithImage(
       return { detection: acro, imageDataUrl: page.dataUrl }
     }
 
-    let detection = await runPipeline(input, page.dataUrl, page.width, page.height, onStage)
+    // Tier 1 expects a raster image (the backend rejects PDF bytes), so
+    // upload the rasterized first page — spec §6: "already rasterized by
+    // frontend if source was PDF".
+    const pageBlob = await (await fetch(page.dataUrl)).blob()
+    let detection = await runPipeline(pageBlob, page.dataUrl, page.width, page.height, onStage)
     if (pageCount > 1) {
       detection = {
         ...detection,

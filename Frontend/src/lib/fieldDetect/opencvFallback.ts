@@ -510,6 +510,61 @@ function pairTextLineLabel(box: BoundingBox, words: OcrWord[]): PairResult | nul
   return null
 }
 
+/* ── Row snapping: tighten text candidates against the OCR layout ──── */
+
+/**
+ * Pass-A candidates are "underline − estimated height" boxes. Refine each
+ * one against the actual words on its row: adopt the row's true top/bottom
+ * and pull the horizontal edges inside the gap between neighbouring words.
+ * Only ever shrinks/corrects within the original candidate's footprint.
+ */
+function snapTextToRow(
+  bbox: BoundingBox,
+  words: OcrWord[]
+): { bbox: BoundingBox; snapped: boolean } {
+  const cy = bbox.y + bbox.height / 2
+
+  const rowWords = words.filter((w) => {
+    const wcy = (w.y0 + w.y1) / 2
+    return Math.abs(wcy - cy) < bbox.height * 0.9
+  })
+  if (rowWords.length === 0) return { bbox, snapped: false }
+
+  const rowTop = Math.min(...rowWords.map((w) => w.y0))
+  const rowBottom = Math.max(...rowWords.map((w) => w.y1))
+
+  let x1 = bbox.x
+  let x2 = bbox.x + bbox.width
+
+  const maxSpan = bbox.width
+  const leftNeighbors = rowWords.filter((w) => w.x1 <= bbox.x + 4)
+  if (leftNeighbors.length > 0) {
+    const labelEnd = Math.max(...leftNeighbors.map((w) => w.x1))
+    x1 = Math.min(bbox.x + maxSpan * 0.6, Math.max(bbox.x, labelEnd + 2))
+  }
+  const rightNeighbors = rowWords.filter(
+    (w) => w.x0 >= bbox.x + bbox.width - 4 && w.x0 < bbox.x + maxSpan * 2.5
+  )
+  if (rightNeighbors.length > 0) {
+    const nextStart = Math.min(...rightNeighbors.map((w) => w.x0))
+    x2 = Math.max(bbox.x + maxSpan * 0.4, Math.min(bbox.x + bbox.width, nextStart - 2))
+  }
+  if (x2 - x1 < 14) {
+    x1 = bbox.x
+    x2 = bbox.x + bbox.width
+  }
+
+  return {
+    bbox: {
+      x: x1,
+      y: rowTop - 2,
+      width: Math.max(14, x2 - x1),
+      height: Math.max(10, rowBottom - rowTop + 4),
+    },
+    snapped: true,
+  }
+}
+
 /* ── Radio grouping ────────────────────────────────────────────────── */
 
 function groupRadios(radios: DetectedField[]): void {
@@ -578,13 +633,20 @@ export async function detectFieldsViaOpenCV(
     // its word boxes are then scaled into the workspace.
     onStage?.('Reading page text (on-device OCR)…')
     const rawWords = await tesseractWords(dataUrl)
-    const words = rawWords.map((w) => ({
-      ...w,
-      x0: w.x0 * scale,
-      y0: w.y0 * scale,
-      x1: w.x1 * scale,
-      y1: w.y1 * scale,
-    }))
+    // Defensive bounds check — guards against decoder/EXIF divergence where
+    // Tesseract's reported boxes wouldn't match our workspace scaling
+    const words = rawWords
+      .map((w) => ({
+        ...w,
+        x0: w.x0 * scale,
+        y0: w.y0 * scale,
+        x1: w.x1 * scale,
+        y1: w.y1 * scale,
+      }))
+      .filter(
+        (w) =>
+          w.x0 >= -2 && w.y0 >= -2 && w.x1 <= W + 4 && w.y1 <= H + 4
+      )
     const heights = words.map((w) => w.y1 - w.y0).sort((a, b) => a - b)
     const medianH = heights.length > 0 ? heights[Math.floor(heights.length / 2)] : 22
     const estTextH = Math.min(48, Math.max(12, medianH))
@@ -650,15 +712,16 @@ export async function detectFieldsViaOpenCV(
     const lowConfidence: string[] = []
 
     for (const t of filteredText) {
-      const pair = pairTextLineLabel(t.bbox, words)
+      const { bbox: snappedBbox, snapped } = snapTextToRow(t.bbox, words)
+      const pair = pairTextLineLabel(snappedBbox, words)
       let confidence = 0.45 + (pair ? 0.25 : 0) + (pair?.priorityHit ? 0.1 : 0)
       if (!pair || !pair.label) confidence *= 0.5
       fields.push({
         id: `field_${index++}`,
         label: pair?.label ?? '',
         fieldType: /\b(date|dob|birth|expir)\b/i.test(pair?.label ?? '') ? 'date' : 'text_line',
-        bbox: toSourceBox(t.bbox),
-        confidence: Math.min(0.9, confidence),
+        bbox: toSourceBox(snappedBbox),
+        confidence: Math.min(0.9, confidence + (snapped ? 0.05 : 0)),
         source: 'cv',
       })
     }
