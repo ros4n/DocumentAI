@@ -8,32 +8,54 @@
    ============================================================ */
 
 @theme inline {
+  /* shadcn-style roles (kept for existing ui/* components) */
   --color-background: var(--bg);
   --color-foreground: var(--text);
   --color-card: var(--surface);
   --color-card-foreground: var(--text);
   --color-primary: var(--accent);
-  --color-primary-foreground: #ffffff;
+  --color-primary-foreground: var(--text-on-accent);
   --color-secondary: var(--bg-soft);
   --color-secondary-foreground: var(--text);
   --color-muted: var(--bg-soft);
   --color-muted-foreground: var(--text-muted);
   --color-accent: var(--accent);
-  --color-accent-foreground: #ffffff;
+  --color-accent-foreground: var(--text-on-accent);
   --color-accent-strong: var(--accent-strong);
   --color-destructive: var(--danger);
   --color-border: var(--border);
   --color-input: var(--border-strong);
   --color-ring: var(--accent);
 
-  --font-display: 'Space Grotesk', var(--sans);
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* semantic names for the redesign — bg-surface-raised, text-text-muted, … */
+  --color-surface-page: var(--bg);
+  --color-surface-sunken: var(--bg-soft);
+  --color-surface-raised: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-text-on-accent: var(--text-on-accent);
+  --color-accent-hover: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-border-strong: var(--border-strong);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --font-display: var(--display);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
 
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+
+  --ease-out-soft: var(--ease-out-soft);
+  --ease-spring: var(--ease-spring);
 }
 
 /* Motion language — one shared physical easing set */

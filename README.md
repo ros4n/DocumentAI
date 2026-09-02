@@ -1,24 +1,26 @@
-# DocumentAI
+# Snappy
 
-Smart document scanning and OCR platform with AI-assisted form filling.
+Smart document scanning and OCR with AI-assisted form filling.
 
-Upload or capture images and PDFs, extract text with OCR, and auto-fill forms from your saved profile — all from a modern, PWA-enabled web app.
+Capture or upload images and PDFs, clean them up on device (perspective correction, deskew, contrast), extract text with OCR, and auto-fill forms from your saved profile — all from a modern, installable PWA.
 
 ## Features
 
-- **Scan from camera or upload** — capture documents directly from your webcam or upload images/PDFs
-- **OCR text extraction** — server-side OCR via [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX runtime, runs locally) for images and PDFs (up to 15 pages, 25 MB)
-- **AI form filling** — optional LLM integration (OpenAI-compatible endpoints) that analyzes forms and fills them from your profile data
+- **Scan from camera or upload** — capture documents directly from your camera or upload images/PDFs
+- **On-device scan clean-up** — OpenCV.js perspective correction, deskew, illumination flattening, contrast, and upscaling before OCR runs
+- **OCR text extraction** — server-side OCR via [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX runtime) for images and PDFs (up to 15 pages, 25 MB); on-device Tesseract.js fallback
+- **AI form filling** — optional LLM integration (OpenAI-compatible endpoints) for semantic field matching; deterministic keyword matching + date/format normalization otherwise
+- **Editable field review** — drag, resize, relabel, or draw the detected field boxes before filling
 - **User profiles** — store contact, employment, ID, and custom fields to reuse across forms
 - **Scan history** — browse, search, filter, rename, and delete past scans with side-by-side original/filled comparison
 - **Image tools** — cropping, zooming, and a fullscreen before/after viewer
-- **PWA support** — installable, with app icon and offline-friendly shell
+- **PWA support** — installable, light/dark theme, offline-friendly shell
 
 ## Tech Stack
 
 | Layer    | Technology |
 | -------- | ---------- |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, Radix UI (shadcn/ui-style), PDF.js, Tesseract.js |
+| Frontend | React 19, TypeScript, Vite 8, Tailwind CSS 4, Radix UI, self-hosted fonts, PDF.js, Tesseract.js, OpenCV.js |
 | Backend  | Django 6, Django REST Framework, Token Auth |
 | OCR      | RapidOCR (ONNX Runtime), PyMuPDF |
 | Database | PostgreSQL (Render), SQLite for local dev |

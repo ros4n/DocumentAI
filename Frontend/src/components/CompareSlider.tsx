@@ -9,22 +9,15 @@ interface CompareSliderProps {
 }
 
 /**
- * Interactive before/after comparison — drag (or use arrow keys) to wipe
- * between the original scan and the AI-filled result.
- *
- * Position lives in a MotionValue (not React state): the clip-path and
- * divider transform read it directly, so dragging renders at full framerate
- * without re-rendering this subtree.
+ * Drag (or arrow-key) to wipe between the original scan and the filled result.
+ * Position lives in a MotionValue, not React state, so dragging renders at full
+ * framerate without re-rendering this subtree.
  */
-export default function CompareSlider({
-  beforeSrc,
-  afterSrc,
-}: CompareSliderProps) {
+export default function CompareSlider({ beforeSrc, afterSrc }: CompareSliderProps) {
   const pos = useMotionValue(50)
   const reducedMotion = useReducedMotion()
   const introRef = useRef<AnimationPlaybackControls | null>(null)
 
-  // One-time affordance sweep so users discover the control
   useEffect(() => {
     if (reducedMotion) return
     pos.set(22)
@@ -47,24 +40,42 @@ export default function CompareSlider({
   const left = useTransform(pos, (v) => `${v}%`)
 
   return (
-    <div className="compare-slider" onPointerDown={cancelIntro}>
-      <img src={afterSrc} alt="Filled form" draggable={false} />
+    <div
+      className="relative select-none overflow-hidden rounded-2xl border border-border bg-surface-2 [cursor:ew-resize] [touch-action:pan-y]"
+      onPointerDown={cancelIntro}
+    >
+      <img src={afterSrc} alt="Filled form" draggable={false} className="pointer-events-none block w-full" />
 
-      <motion.div className="compare-top-layer" style={{ clipPath }} aria-hidden>
-        <img src={beforeSrc} alt="" draggable={false} />
+      <motion.div className="absolute inset-0 overflow-hidden" style={{ clipPath }} aria-hidden>
+        <img
+          src={beforeSrc}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
       </motion.div>
 
-      <span className="compare-tag before">Original</span>
-      <span className="compare-tag after">Filled</span>
+      <span className="pointer-events-none absolute left-2.5 top-2.5 rounded-full bg-black/60 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-white backdrop-blur-sm">
+        Original
+      </span>
+      <span className="pointer-events-none absolute right-2.5 top-2.5 rounded-full bg-accent/80 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-white backdrop-blur-sm">
+        Filled
+      </span>
 
-      <motion.div className="compare-divider" style={{ left }} aria-hidden>
-        <span className="compare-grip" />
+      <motion.div
+        className="pointer-events-none absolute bottom-0 top-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(33,29,25,0.18),0_2px_10px_rgba(0,0,0,0.25)]"
+        style={{ left }}
+        aria-hidden
+      >
+        <span className="absolute left-1/2 top-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-[2.5px] rounded-full bg-white text-text shadow-[0_2px_10px_rgba(0,0,0,0.3)]">
+          <span className="h-2.5 w-0.5 rounded-full bg-current opacity-75" />
+          <span className="h-2.5 w-0.5 rounded-full bg-current opacity-75" />
+        </span>
       </motion.div>
 
-      {/* Uncontrolled — the MotionValue is the source of truth */}
       <input
         type="range"
-        className="compare-range"
+        className="absolute inset-0 m-0 h-full w-full cursor-[ew-resize] appearance-none bg-transparent opacity-0"
         min={0}
         max={100}
         step={0.5}
@@ -75,7 +86,6 @@ export default function CompareSlider({
         }}
         aria-label="Compare original and filled form"
       />
-      <span className="compare-focus-ring" aria-hidden />
     </div>
   )
 }

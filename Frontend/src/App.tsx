@@ -1,37 +1,31 @@
-import { useEffect, useState } from 'react'
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import { Suspense, lazy, useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Toaster } from 'sonner'
-import LoginPage from './pages/LoginPage'
-import SignupPage from './pages/SignupPage'
-import HomePage from './pages/HomePage'
 import { apiMe, clearSession, getSession } from './lib/api'
 import { prefillProfileName } from './lib/profile'
+import { IconProvider } from './components/icons'
 
-type Page = 'login' | 'signup' | 'home'
+// Route-level code splitting: a logged-out visitor only downloads the
+// landing chunk; the app shell (HomePage + capture/OCR/fill pipeline,
+// framer, all dialogs) loads on demand after sign-in.
+const LandingPage = lazy(() => import('./pages/LandingPage'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const SignupPage = lazy(() => import('./pages/SignupPage'))
+const HomePage = lazy(() => import('./pages/HomePage'))
 
-// Directional slide: signup sits "after" login in the flow
-const pageVariants = {
-  initial: (direction: number) => ({
-    opacity: 0,
-    x: direction >= 0 ? 28 : -28,
-    scale: 0.99,
-  }),
-  animate: {
-    opacity: 1,
-    x: 0,
-    scale: 1,
-    transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] as const },
-  },
-  exit: (direction: number) => ({
-    opacity: 0,
-    x: direction >= 0 ? -20 : 20,
-    scale: 0.995,
-    transition: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
-  }),
+type Page = 'landing' | 'login' | 'signup' | 'home'
+
+function Splash() {
+  return (
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-5 bg-surface-page">
+      <img src="/icon.svg" alt="Snappy" className="h-12 w-12" />
+      <div className="size-6 animate-spin rounded-full border-2 border-border border-t-accent" />
+    </div>
+  )
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('login')
+  const [page, setPage] = useState<Page>('landing')
   const [checking, setChecking] = useState(true)
   const [direction, setDirection] = useState(1)
 
@@ -49,7 +43,7 @@ export default function App() {
       })
       .catch(() => {
         clearSession()
-        setPage('login')
+        setPage('landing')
       })
       .finally(() => setChecking(false))
   }, [])
@@ -63,92 +57,52 @@ export default function App() {
   const logout = () => {
     clearSession()
     setDirection(-1)
-    setPage('login')
+    setPage('landing')
   }
 
-  let content
-  if (checking) {
-    content = (
-      <div className="auth-page">
-        <div className="auth-bg-glow" />
-        <div className="auth-brand">
-          <div className="brand-logo">
-            <img className="brand-logo-img" src="/icon.svg" alt="Snappy" />
-          </div>
-          <h1>Snappy</h1>
-        </div>
-        <div className="spinner auth-check-spinner" />
-      </div>
-    )
-  } else {
-    content = (
-      <AnimatePresence mode="wait" custom={direction} initial={false}>
-        {page === 'signup' && (
-          <motion.div
-            key="signup"
-            className="app-page"
-            custom={direction}
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-          >
-            <SignupPage
-              onLogin={() => {
-                setDirection(-1)
-                setPage('login')
-              }}
-              onSignupSuccess={(name) => goHome(name, true)}
-            />
-          </motion.div>
-        )}
-        {page === 'home' && (
-          <motion.div
-            key="home"
-            className="app-page"
-            custom={direction}
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-          >
-            <HomePage onLogout={logout} />
-          </motion.div>
-        )}
-        {page === 'login' && (
-          <motion.div
-            key="login"
-            className="app-page"
-            custom={direction}
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-          >
-            <LoginPage
-              onSignup={() => {
-                setDirection(1)
-                setPage('signup')
-              }}
-              onLoginSuccess={(name) => goHome(name, false)}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    )
+  const go = (next: Page, dir: number) => {
+    setDirection(dir)
+    setPage(next)
   }
+
+  if (checking) return <Splash />
+
+  const routed = (
+    <div
+      key={page}
+      className="page-enter flex w-full justify-center"
+      style={{ '--page-enter-x': `${direction >= 0 ? 24 : -24}px` } as CSSProperties}
+    >
+      {page === 'landing' && (
+        <LandingPage onGetStarted={() => go('signup', 1)} onLogin={() => go('login', 1)} />
+      )}
+      {page === 'signup' && (
+        <div className="app-shell">
+          <SignupPage onLogin={() => go('login', -1)} onSignupSuccess={(name) => goHome(name, true)} />
+        </div>
+      )}
+      {page === 'login' && (
+        <div className="app-shell">
+          <LoginPage onSignup={() => go('signup', 1)} onLoginSuccess={(name) => goHome(name, false)} />
+        </div>
+      )}
+      {page === 'home' && (
+        <div className="app-shell">
+          <HomePage onLogout={logout} />
+        </div>
+      )}
+    </div>
+  )
 
   return (
-    <MotionConfig reducedMotion="user">
-      <div className="app-shell">
-        {content}
-        <Toaster
-          theme="light"
-          position="bottom-center"
-          offset={88}
-          toastOptions={{ duration: 2600 }}
-        />
-      </div>
-    </MotionConfig>
+    <IconProvider>
+      <Suspense fallback={<Splash />}>{routed}</Suspense>
+      <Toaster
+        theme="system"
+        position="bottom-center"
+        offset={88}
+        toastOptions={{ duration: 2600 }}
+      />
+    </IconProvider>
   )
 }

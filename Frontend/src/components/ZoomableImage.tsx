@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
+import { cn } from '../lib/utils'
+import { Plus, Minus, ArrowCounterClockwise } from './icons'
 
 interface ZoomableImageProps {
   src: string
@@ -13,6 +15,9 @@ interface ViewState {
   x: number
   y: number
 }
+
+const zoomBtn =
+  'grid size-[30px] place-items-center rounded-full border border-border-strong bg-surface-raised text-text shadow-sm disabled:opacity-40'
 
 export function ZoomableImage({ src, alt = '', className = '', onClick }: ZoomableImageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -130,11 +135,7 @@ export function ZoomableImage({ src, alt = '', className = '', onClick }: Zoomab
       if (!p0) return
       const dx = e.clientX - p0.x
       const dy = e.clientY - p0.y
-      apply({
-        scale: viewRef.current.scale,
-        x: dragRef.current.x + dx,
-        y: dragRef.current.y + dy,
-      })
+      apply({ scale: viewRef.current.scale, x: dragRef.current.x + dx, y: dragRef.current.y + dy })
     }
   }
 
@@ -151,23 +152,23 @@ export function ZoomableImage({ src, alt = '', className = '', onClick }: Zoomab
     if (natural.w === 0) return
     const rect = containerRef.current?.getBoundingClientRect()
     if (!rect) return
-    if (viewRef.current.scale > 1.0001) {
-      reset()
-    } else {
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, 2)
-    }
+    if (viewRef.current.scale > 1.0001) reset()
+    else zoomAt(e.clientX - rect.left, e.clientY - rect.top, 2)
   }
 
   const total = fitScale * view.scale
   const transform =
-    natural.w === 0
-      ? 'none'
-      : `translate(${view.x}px, ${view.y}px) scale(${total})`
+    natural.w === 0 ? 'none' : `translate(${view.x}px, ${view.y}px) scale(${total})`
 
   return (
     <div
       ref={containerRef}
-      className={`zoomable${dragging ? ' dragging' : ''}${view.scale > 1 ? ' zoomed' : ''}${onClick ? ' clickable' : ''}${className ? ` ${className}` : ''}`}
+      className={cn(
+        'relative h-[min(55dvh,520px)] touch-none select-none overflow-hidden rounded-xl border border-border bg-surface-sunken',
+        view.scale > 1 ? 'cursor-grab' : onClick ? 'cursor-zoom-in' : 'cursor-grab',
+        dragging && 'cursor-grabbing',
+        className
+      )}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
@@ -192,31 +193,32 @@ export function ZoomableImage({ src, alt = '', className = '', onClick }: Zoomab
           const img = e.currentTarget
           setNatural({ w: img.naturalWidth, h: img.naturalHeight })
         }}
+        className="absolute left-0 top-0 h-auto w-auto max-w-none origin-top-left [will-change:transform]"
         style={{ transform }}
       />
-      <div className="zoom-controls">
+      <div className="absolute bottom-2 right-2 z-[3] flex gap-1.5">
         <button
-          className="zoom-btn"
+          className={zoomBtn}
           onClick={(e) => {
             e.stopPropagation()
             zoomAt(containerRef.current!.clientWidth / 2, containerRef.current!.clientHeight / 2, 1.25)
           }}
           aria-label="Zoom in"
         >
-          +
+          <Plus size={14} />
         </button>
         <button
-          className="zoom-btn"
+          className={zoomBtn}
           onClick={(e) => {
             e.stopPropagation()
             zoomAt(containerRef.current!.clientWidth / 2, containerRef.current!.clientHeight / 2, 0.8)
           }}
           aria-label="Zoom out"
         >
-          −
+          <Minus size={14} />
         </button>
         <button
-          className="zoom-btn"
+          className={zoomBtn}
           onClick={(e) => {
             e.stopPropagation()
             reset()
@@ -224,7 +226,7 @@ export function ZoomableImage({ src, alt = '', className = '', onClick }: Zoomab
           disabled={view.scale <= 1.0001}
           aria-label="Reset zoom"
         >
-          ⟲
+          <ArrowCounterClockwise size={14} />
         </button>
       </div>
     </div>

@@ -18,6 +18,12 @@ interface Box {
 type DragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se'
 
 const HANDLES: DragMode[] = ['nw', 'ne', 'sw', 'se']
+const HANDLE_POS: Record<Exclude<DragMode, 'move'>, string> = {
+  nw: '-left-[9px] -top-[9px] cursor-nwse-resize',
+  ne: '-right-[9px] -top-[9px] cursor-nesw-resize',
+  sw: '-left-[9px] -bottom-[9px] cursor-nesw-resize',
+  se: '-right-[9px] -bottom-[9px] cursor-nwse-resize',
+}
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
 
@@ -119,12 +125,12 @@ export default function CropImage({ src, onCancel, onCrop }: CropImageProps) {
       <DialogContent className="wm-dialog">
         <DialogHeader className="text-left">
           <DialogTitle>Crop scan</DialogTitle>
-          <p className="engine-badge">Drag inside the box to move · corners to resize</p>
+          <p className="text-xs text-text-muted">Drag inside the box to move, corners to resize.</p>
         </DialogHeader>
 
         <div
-          className="crop-area"
           ref={areaRef}
+          className="relative flex h-[min(58dvh,500px)] touch-none select-none items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-sunken"
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
@@ -133,20 +139,20 @@ export default function CropImage({ src, onCancel, onCrop }: CropImageProps) {
             ref={imgRef}
             src={src}
             alt="Crop preview"
-            className="crop-image"
+            className="block max-w-none"
             style={view ? { width: view.w, height: view.h } : undefined}
             draggable={false}
           />
           {view && box && (
             <div
-              className="crop-box"
+              className="absolute cursor-move touch-none border-[1.5px] border-accent bg-accent/10 shadow-[0_0_0_9999px_rgba(8,12,22,0.55)]"
               style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
               onPointerDown={(e) => onPointerDown(e, 'move')}
             >
               {HANDLES.map((corner) => (
                 <div
                   key={corner}
-                  className={`crop-handle ${corner}`}
+                  className={`absolute size-[18px] rounded border-2 border-white bg-accent ${HANDLE_POS[corner as Exclude<DragMode, 'move'>]}`}
                   onPointerDown={(e) => {
                     e.stopPropagation()
                     onPointerDown(e, corner)
@@ -157,7 +163,7 @@ export default function CropImage({ src, onCancel, onCrop }: CropImageProps) {
           )}
         </div>
 
-        <div className="wm-dialog-actions">
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
           <Button variant="secondary" onClick={reset}>Reset</Button>
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
           <Button onClick={apply}>Crop</Button>

@@ -67,7 +67,10 @@ function Button({
     >
       {loading ? (
         <>
-          <span className="btn-spinner" aria-hidden />
+          <span
+            aria-hidden
+            className="size-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+          />
           <span className="sr-only">Loading</span>
           {children}
         </>
