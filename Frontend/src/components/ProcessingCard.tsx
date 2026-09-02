@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { EASE_OUT_SOFT } from '../lib/motion'
+import { Check } from './icons'
 
 interface ProcessingCardProps {
   title: string
@@ -8,7 +9,6 @@ interface ProcessingCardProps {
   /** Parent-known stage index; when omitted the card advances on a timer */
   forceStep?: number
   note?: string
-  fallback?: string | null
 }
 
 /**
@@ -16,13 +16,7 @@ interface ProcessingCardProps {
  * processing is sometimes fast (server hit) and sometimes slow
  * (falling back through the chain) instead of staring at a bare spinner.
  */
-export default function ProcessingCard({
-  title,
-  steps,
-  forceStep,
-  note,
-  fallback,
-}: ProcessingCardProps) {
+export default function ProcessingCard({ title, steps, forceStep, note }: ProcessingCardProps) {
   const [estimate, setEstimate] = useState(0)
   const total = Math.max(steps.length, 1)
 
@@ -40,35 +34,43 @@ export default function ProcessingCard({
 
   return (
     <motion.div
-      className="pipeline-card"
+      className="w-full max-w-[280px] rounded-2xl border border-border bg-surface-raised p-4 shadow-lg"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 8 }}
       transition={{ duration: 0.28, ease: EASE_OUT_SOFT }}
       role="status"
       aria-live="polite"
     >
-      <div className="pipeline-progress" aria-hidden>
+      <div className="mb-3 h-1 overflow-hidden rounded-full bg-surface-sunken" aria-hidden>
         <motion.div
-          className="pipeline-progress-bar"
+          className="h-full rounded-full bg-accent"
           animate={{ width: `${progress}%` }}
           transition={{ duration: 0.4, ease: EASE_OUT_SOFT }}
         />
       </div>
 
-      <p className="review-group" style={{ fontSize: 14.5 }}>{title}</p>
+      <p className="mb-3 font-display text-sm font-semibold">{title}</p>
 
-      <div className="pipeline-steps">
+      <div className="flex flex-col gap-2">
         {steps.map((label, i) => {
           const state = i < currentStep ? 'done' : i === currentStep ? 'active' : 'pending'
           return (
-            <div key={label} className={`pipeline-step ${state}`}>
-              <span className="pipeline-step-dot" aria-hidden>
-                {state === 'done' && (
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
+            <div
+              key={label}
+              className={`flex items-center gap-2.5 text-[13px] ${
+                state === 'pending' ? 'text-text-faint' : 'text-text'
+              }`}
+            >
+              <span
+                className={`grid size-4 shrink-0 place-items-center rounded-full ${
+                  state === 'done'
+                    ? 'bg-accent'
+                    : state === 'active'
+                      ? 'border-2 border-accent'
+                      : 'border-2 border-border-strong'
+                }`}
+              >
+                {state === 'done' && <Check size={11} weight="bold" color="#fff" />}
               </span>
               <span>{label}</span>
             </div>
@@ -76,36 +78,7 @@ export default function ProcessingCard({
         })}
       </div>
 
-      <AnimatePresence mode="wait">
-        {note && (
-          <motion.p
-            key={note}
-            className="pipeline-note"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18, ease: EASE_OUT_SOFT }}
-          >
-            {note}
-          </motion.p>
-        )}
-        {fallback && (
-          <motion.span
-            key={fallback}
-            className="pipeline-fallback"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18, ease: EASE_OUT_SOFT }}
-          >
-            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
-              <circle cx="12" cy="12" r="3.5" />
-            </svg>
-            {fallback}
-          </motion.span>
-        )}
-      </AnimatePresence>
+      {note && <p className="mt-3 text-xs text-text-muted">{note}</p>}
     </motion.div>
   )
 }

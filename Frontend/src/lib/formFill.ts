@@ -30,10 +30,10 @@ export function glyphShape(glyph: string): 'checkbox' | 'radio' {
 
 const MAX_FIELDS = 40
 
-// LLM semantic detection & matching is disabled. The code paths below
-// (analyzeForm vision branch, matchFields LLM path) are kept intact for
-// future use — flip this to true to re-enable.
-const LLM_SEMANTIC_ENABLED = false
+// Semantic (LLM) field matching + vision structure detection activate
+// automatically whenever an OpenAI-compatible endpoint is configured in
+// Engine Settings (`llmConfigured()`); otherwise everything falls back to
+// deterministic keyword matching. There is no separate on/off flag.
 
 function parseBbox(raw: string | undefined): [number, number, number, number] | null {
   if (!raw) return null
@@ -570,28 +570,57 @@ export interface MatchResult {
 
 type TextProfileKey = Exclude<keyof ProfileData, 'customFields'>
 
+// Order matters: specific keys win over broader ones (e.g. "company name"
+// before the bare "name" fallback, which sits last). Matching is
+// word-boundary based, so "designation" does NOT match "nation".
 const KEYWORD_MAP: Array<[string[], TextProfileKey]> = [
-  [['full name', 'legal name', 'name'], 'fullName'],
-  [['first name', 'given name'], 'firstName'],
-  [['last name', 'surname', 'family name'], 'lastName'],
-  [['email', 'e mail', 'e-mail'], 'email'],
-  [['phone', 'mobile', 'telephone', 'tel', 'cell'], 'phone'],
-  [['date of birth', 'dob', 'birth date', 'birthday', 'birth'], 'dob'],
-  [['address', 'street', 'residence'], 'address'],
-  [['city'], 'city'],
-  [['state', 'province'], 'state'],
-  [['zip', 'postal'], 'zip'],
-  [['country'], 'country'],
-  [['nationality'], 'nationality'],
-  [['employer', 'company', 'organization', 'organisation', 'business name'], 'employer'],
-  [['occupation', 'job title', 'profession', 'position'], 'occupation'],
+  [['first name', 'given name', 'given names', 'forename', 'christian name'], 'firstName'],
+  [['last name', 'surname', 'family name', 'father name'], 'lastName'],
+  [['full name', 'legal name', 'name of applicant', 'applicant name', 'your name'], 'fullName'],
+  [['email', 'e mail', 'e-mail', 'email address', 'email id'], 'email'],
+  [
+    ['phone', 'mobile', 'telephone', 'tel', 'cell', 'contact number', 'contact no', 'phone number', 'phone no'],
+    'phone',
+  ],
+  [['date of birth', 'dob', 'd o b', 'birth date', 'birthdate', 'birthday', 'born on'], 'dob'],
+  [
+    ['street address', 'residential address', 'mailing address', 'postal address', 'home address', 'address', 'street'],
+    'address',
+  ],
+  [['town or city', 'city', 'town'], 'city'],
+  [['state', 'province', 'region', 'county'], 'state'],
+  [['zip', 'postal code', 'post code', 'postcode', 'zip code', 'pin code'], 'zip'],
+  [['country of residence', 'country', 'nation'], 'country'],
+  [['nationality', 'citizenship'], 'nationality'],
+  [
+    ['company name', 'employer', 'company', 'organization', 'organisation', 'business name', 'workplace', 'firm'],
+    'employer',
+  ],
+  [['occupation', 'job title', 'profession', 'position', 'designation', 'role'], 'occupation'],
   [['gender', 'sex'], 'gender'],
-  [['marital status', 'married'], 'maritalStatus'],
-  [['id number', 'id no', 'identification', 'passport', 'license number', 'ssn', 'social security'], 'idNumber'],
+  [['marital status', 'civil status', 'married'], 'maritalStatus'],
+  [
+    [
+      'id number', 'id no', 'identification number', 'identification', 'passport number', 'passport no',
+      'passport', 'licence number', 'license number', 'driver licence', 'driver license', 'national id',
+      'ssn', 'social security number', 'social security', 'tax id', 'aadhaar', 'nric',
+    ],
+    'idNumber',
+  ],
+  // Trailing catch-all: only reached when nothing more specific matched.
+  [['name'], 'fullName'],
 ]
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+/** Whole-word keyword match against a normalized label. */
+function labelHasKeyword(normLabel: string, keywords: string[]): boolean {
+  return keywords.some((k) => {
+    const re = new RegExp(`(?:^| )${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: |$)`)
+    return re.test(normLabel)
+  })
 }
 
 const OPTION_MAP: Record<string, string[]> = {
@@ -607,7 +636,7 @@ export function suggestOptions(
   if (llmOptions && llmOptions.length > 0) return llmOptions
   const label = normalize(field.label)
   for (const [keywords, key] of KEYWORD_MAP) {
-    if (keywords.some((k) => label.includes(k))) {
+    if (labelHasKeyword(label, keywords)) {
       const preset = OPTION_MAP[key]
       if (preset && preset.length > 0) {
         const pv = profile[key].trim()
@@ -652,7 +681,7 @@ export function heuristicMatch(
     }
     if (field.kind === 'checkbox') {
       for (const [keywords, key] of KEYWORD_MAP) {
-        if (keywords.some((k) => label.includes(k))) {
+        if (labelHasKeyword(label, keywords)) {
           const profileValue = profile[key].trim()
           if (profileValue && (label.includes(normalize(profileValue)) || isYes(profileValue))) {
             return { fieldId: field.id, value: '', checked: true, confidence: 0.8 }
@@ -679,7 +708,7 @@ export function heuristicMatch(
     }
 
     for (const [keywords, key] of KEYWORD_MAP) {
-      if (keywords.some((k) => label.includes(k))) {
+      if (labelHasKeyword(label, keywords)) {
         const value = profile[key].trim()
         if (value) {
           return { fieldId: field.id, value, checked: false, confidence: 0.7 }
@@ -707,7 +736,7 @@ export function heuristicMatch(
     else groups.set(key, [f])
   }
   for (const [key, groupFields] of groups) {
-    const entry = KEYWORD_MAP.find(([keywords]) => keywords.some((k) => key.includes(k)))
+    const entry = KEYWORD_MAP.find(([keywords]) => labelHasKeyword(key, keywords))
     if (!entry) continue
     const profileValue = normalize(profile[entry[1]])
     if (!profileValue) continue
@@ -732,6 +761,87 @@ export function heuristicMatch(
   }
 
   return decisions
+}
+
+/* ============ VALUE NORMALIZATION ============ */
+
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+type DateOrder = 'dmy' | 'mdy' | 'ymd'
+interface DateFmt {
+  order: DateOrder
+  sep: string
+}
+
+/** Read a date-format hint out of a field label, e.g. "DOB (DD/MM/YYYY)". */
+function detectDateFormat(label: string): DateFmt | null {
+  const l = label.toLowerCase()
+  let m = l.match(/d{1,2}\s*([/.\-])\s*m{1,2}\s*[/.\-]\s*y{2,4}/)
+  if (m) return { order: 'dmy', sep: m[1] }
+  m = l.match(/m{1,2}\s*([/.\-])\s*d{1,2}\s*[/.\-]\s*y{2,4}/)
+  if (m) return { order: 'mdy', sep: m[1] }
+  m = l.match(/y{4}\s*([/.\-])\s*m{1,2}\s*[/.\-]\s*d{1,2}/)
+  if (m) return { order: 'ymd', sep: m[1] }
+  return null
+}
+
+/** Best-effort parse of an arbitrary date string to `YYYY-MM-DD`. */
+function toIsoDate(value: string): string | null {
+  const v = value.trim()
+  const iso = v.match(ISO_DATE_RE)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const parsed = new Date(v)
+  if (!Number.isNaN(parsed.getTime()) && /\d{4}/.test(v)) {
+    const y = parsed.getFullYear()
+    const mo = String(parsed.getMonth() + 1).padStart(2, '0')
+    const d = String(parsed.getDate()).padStart(2, '0')
+    return `${y}-${mo}-${d}`
+  }
+  return null
+}
+
+function formatIsoDate(iso: string, fmt: DateFmt): string {
+  const [y, mo, d] = iso.split('-')
+  const parts =
+    fmt.order === 'dmy' ? [d, mo, y] : fmt.order === 'ymd' ? [y, mo, d] : [mo, d, y]
+  return parts.join(fmt.sep)
+}
+
+const DATE_LABEL_RE = /\b(date|dob|d\.?o\.?b\.?|birth|expiry|expiration|issued?)\b/i
+
+/**
+ * Deterministic post-processing applied to every match result (heuristic
+ * OR LLM). Currently: reformat dates to a format the field's label
+ * explicitly asks for, and tidy phone numbers when a field wants digits.
+ */
+export function normalizeDecisions(
+  decisions: FillDecision[],
+  fields: FormField[]
+): FillDecision[] {
+  return decisions.map((d) => {
+    if (d.checked || !d.value) return d
+    const field = fields.find((f) => f.id === d.fieldId)
+    if (!field) return d
+    const label = field.label || ''
+
+    // Dates: only rewrite when the label carries an explicit format hint.
+    if (field.kind === 'date' || DATE_LABEL_RE.test(label)) {
+      const iso = toIsoDate(d.value)
+      if (iso) {
+        const fmt = detectDateFormat(label)
+        if (fmt) return { ...d, value: formatIsoDate(iso, fmt) }
+        if (field.kind === 'date') return { ...d, value: iso }
+      }
+    }
+
+    // Phone: strip to digits (keep a leading +) when the blank wants numbers.
+    if (/\b(phone|mobile|tel|contact|fax)\b/i.test(label) && /digits?\s*only|numbers?\s*only/i.test(label)) {
+      const cleaned = d.value.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '')
+      if (cleaned) return { ...d, value: cleaned }
+    }
+
+    return d
+  })
 }
 
 function parseLlmDecisions(
@@ -761,11 +871,11 @@ export async function matchFields(
 ): Promise<MatchResult> {
   const config = getLlmConfig()
   const fallback = (): MatchResult => ({
-    decisions: heuristicMatch(fields, profile),
+    decisions: normalizeDecisions(heuristicMatch(fields, profile), fields),
     source: 'heuristic',
   })
 
-  if (!LLM_SEMANTIC_ENABLED || !llmConfigured() || fields.length === 0) {
+  if (!llmConfigured() || fields.length === 0) {
     return fallback()
   }
 
@@ -774,15 +884,20 @@ export async function matchFields(
   )
   const profileJson = JSON.stringify(profile)
   const prompt =
-    `You are a form-filling assistant. The user profile JSON is: ${profileJson}\n\n` +
-    `The form has these fields: ${fieldList}\n\n` +
-    `Decide what to fill in each field from the profile. Match by meaning (e.g. "Surname" -> lastName). ` +
-    `For checkbox fields set "checked": true/false and "value": "". ` +
-    `Checkbox options sharing the same "group" (e.g. group "Gender" with options Male/Female) form a ` +
-    `single-choice question: tick exactly the one option matching the profile, leave the rest unchecked. ` +
-    `Never write a word into a checkbox field. ` +
-    `For fields with no suitable profile value use "value": "". ` +
-    `Return ONLY valid JSON, an array: [{"fieldId":"...","value":"...","checked":false,"confidence":0.9}]`
+    `You fill paper forms from a saved profile. Profile JSON: ${profileJson}\n\n` +
+    `Form fields: ${fieldList}\n\n` +
+    `For each field decide the value from the profile, matched by MEANING, not just wording ` +
+    `(e.g. "Surname" or "Family name" -> lastName; "Given name(s)" -> firstName; ` +
+    `"D.O.B." -> dob; "Residential address" -> address; "Post code" -> zip). ` +
+    `If the form splits a name into separate fields, split the profile's fullName accordingly. ` +
+    `Dates: the profile's dob is ISO (YYYY-MM-DD). If the field label shows a format like ` +
+    `(DD/MM/YYYY) or (MM-DD-YYYY), output the date in exactly that format; if kind is "date", ` +
+    `output ISO YYYY-MM-DD; otherwise output DD Mon YYYY. ` +
+    `Checkboxes: set "checked" true/false and "value":"". Options sharing a "group" are a ` +
+    `single-choice question — tick exactly the one matching the profile, leave the rest unchecked. ` +
+    `Never write text into a checkbox. ` +
+    `When the profile has nothing suitable, use "value":"" and "confidence":0 — never invent data. ` +
+    `Return ONLY a JSON array: [{"fieldId":"...","value":"...","checked":false,"confidence":0.0-1.0}]`
 
   try {
     let raw: string
@@ -802,13 +917,14 @@ export async function matchFields(
     const parsed = extractJson(raw)
     const llmMap = parseLlmDecisions(parsed, fields)
     if (llmMap.size === 0) return fallback()
-    const decisions = fields.map((field) => {
+    const heuristics = heuristicMatch(fields, profile)
+    const decisions = fields.map((field, i) => {
       const d = llmMap.get(field.id)
       if (d) return d
-      const heuristic = heuristicMatch([field], profile)[0]
-      return { fieldId: field.id, value: '', checked: false, confidence: heuristic.confidence }
+      // Fields the model didn't return fall back to the keyword guess.
+      return heuristics[i] ?? { fieldId: field.id, value: '', checked: false, confidence: 0 }
     })
-    return { decisions, source: 'llm' }
+    return { decisions: normalizeDecisions(decisions, fields), source: 'llm' }
   } catch (err) {
     const fallbackResult = fallback()
     fallbackResult.error = (err as Error).message
@@ -879,7 +995,7 @@ export async function analyzeForm(
 ): Promise<FormAnalysis> {
   const config = getLlmConfig()
 
-  if (LLM_SEMANTIC_ENABLED && llmConfigured() && config.vision) {
+  if (llmConfigured() && config.vision) {
     const profileJson = JSON.stringify(profile)
     const prompt =
       `You are a form-filling assistant. Here is a scanned form image (coordinates are normalized 0-1000).\n` +
@@ -952,7 +1068,7 @@ export async function analyzeForm(
           })
           return {
             fields,
-            decisions,
+            decisions: normalizeDecisions(decisions, fields),
             structureEngine: 'llm',
             matchSource: 'llm',
           }
@@ -964,11 +1080,7 @@ export async function analyzeForm(
   }
 
   const { fields, engine } = await parseFormStructure(image)
-  const match = await matchFields(
-    fields,
-    profile,
-    LLM_SEMANTIC_ENABLED && config.vision ? image : undefined
-  )
+  const match = await matchFields(fields, profile, config.vision ? image : undefined)
   return {
     fields,
     decisions: match.decisions,

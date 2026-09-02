@@ -1,6 +1,8 @@
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import CompareSlider from '../CompareSlider'
+import { StatusPill, DialogActions } from './_shared'
+import { ArrowsOutSimple } from '../icons'
 import type { FormAnalysis } from '../../lib/formFill'
 
 interface FillResultDialogProps {
@@ -35,46 +37,46 @@ export default function FillResultDialog({
       <DialogContent className="wm-dialog">
         <DialogHeader className="text-left">
           <DialogTitle>Filled form</DialogTitle>
-          <p className="engine-badge">Drag the divider to compare</p>
-          <div className="badge-row">
+          <p className="text-xs text-text-muted">Drag the divider to compare.</p>
+          <div className="pt-1">
             {analysis?.matchSource === 'llm' ? (
-              <span className="status-badge llm">Values: AI matching</span>
+              <StatusPill tone="ai">Values: AI matching</StatusPill>
             ) : (
-              <span className="status-badge warn">Values: keyword matching</span>
+              <StatusPill tone="warn">Values: keyword matching</StatusPill>
             )}
           </div>
         </DialogHeader>
 
-        <div className="compare-wrap">
+        <div className="relative">
           <CompareSlider beforeSrc={originalSrc} afterSrc={filledImage} />
           {onInspect && (
-            <button className="inspect-btn" onClick={onInspect} aria-label="Open side-by-side fullscreen view" title="Fullscreen compare">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 3 21 3 21 9" />
-                <polyline points="9 21 3 21 3 15" />
-                <line x1="21" y1="3" x2="14" y2="10" />
-                <line x1="3" y1="21" x2="10" y2="14" />
-              </svg>
+            <button
+              onClick={onInspect}
+              aria-label="Open side-by-side fullscreen view"
+              title="Fullscreen compare"
+              className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-surface-raised/90 px-2 py-1 text-xs font-medium text-text shadow-sm backdrop-blur"
+            >
+              <ArrowsOutSimple size={14} />
               Inspect
             </button>
           )}
         </div>
 
         {fillSkipped.length > 0 && (
-          <p className="fill-skip-note">
-            Skipped {fillSkipped.length} field{fillSkipped.length === 1 ? '' : 's'} (no clean
-            blank space to write in): {fillSkipped.join(', ')}
+          <p className="rounded-lg bg-surface-sunken px-3 py-2 text-xs text-text-muted">
+            Skipped {fillSkipped.length} field{fillSkipped.length === 1 ? '' : 's'} with no clean blank
+            space: {fillSkipped.join(', ')}
           </p>
         )}
 
-        <div className="wm-dialog-actions">
+        <DialogActions>
           <Button variant="secondary" onClick={onClose}>Done</Button>
           <Button variant="secondary" onClick={onShare}>Share</Button>
           <Button variant="secondary" onClick={onDownload}>Download</Button>
           <Button onClick={onSaveToHistory} disabled={filledSaved || fillBusy}>
-            {filledSaved ? 'Saved ✓' : 'Save to history'}
+            {filledSaved ? 'Saved' : 'Save to history'}
           </Button>
-        </div>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   )

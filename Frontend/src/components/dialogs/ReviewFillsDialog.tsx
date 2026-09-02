@@ -2,6 +2,8 @@ import { motion } from 'framer-motion'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Switch } from '../ui/switch'
+import { StatusPill, DialogActions } from './_shared'
+import { Warning } from '../icons'
 import { suggestOptions } from '../../lib/formFill'
 import type { FillDecision, FormAnalysis } from '../../lib/formFill'
 import { loadProfile } from '../../lib/profile'
@@ -19,6 +21,9 @@ interface ReviewFillsDialogProps {
   onApply: () => void
 }
 
+const fieldInput =
+  'h-10 w-full rounded-lg border border-border bg-surface-raised px-3 text-sm text-text outline-none transition-colors focus:border-accent disabled:opacity-50'
+
 export default function ReviewFillsDialog({
   analysis,
   edits,
@@ -33,27 +38,27 @@ export default function ReviewFillsDialog({
       <DialogContent className="wm-dialog">
         <DialogHeader className="text-left">
           <DialogTitle>Review fills</DialogTitle>
-          <p className="engine-badge">
+          <p className="text-xs text-text-muted">
             {analysis.fields.length} field{analysis.fields.length === 1 ? '' : 's'} found
           </p>
-          <div className="badge-row">
+          <div className="flex flex-wrap gap-1.5 pt-1">
             {analysis.structureEngine === 'llm' ? (
-              <span className="status-badge llm">Fields: AI vision</span>
+              <StatusPill tone="ai">Fields: AI vision</StatusPill>
             ) : analysis.structureEngine === 'server' ? (
-              <span className="status-badge ok">Fields: OCR server</span>
+              <StatusPill tone="ok">Fields: OCR server</StatusPill>
             ) : (
-              <span className="status-badge">Fields: on-device OCR</span>
+              <StatusPill>Fields: on-device</StatusPill>
             )}
             {analysis.matchSource === 'llm' ? (
-              <span className="status-badge llm">Values: AI matching</span>
+              <StatusPill tone="ai">Values: AI matching</StatusPill>
             ) : (
-              <span className="status-badge warn">Values: keyword matching</span>
+              <StatusPill tone="warn">Values: keyword matching</StatusPill>
             )}
           </div>
         </DialogHeader>
 
         <motion.div
-          className="review-list"
+          className="flex max-h-[52vh] flex-col gap-2 overflow-auto pr-1"
           variants={staggerParent}
           initial="initial"
           animate="animate"
@@ -75,25 +80,32 @@ export default function ReviewFillsDialog({
                 <motion.div
                   key={field.group}
                   variants={staggerChild}
-                  className="review-group-block"
+                  className="rounded-xl border border-border bg-surface-raised p-3"
                 >
-                  <div className="review-group-head">
-                    <p className="review-group">{field.group}</p>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="font-display text-sm font-semibold">{field.group}</p>
                     <Switch
                       size="sm"
                       checked={groupIncluded}
                       onCheckedChange={(c) => onToggleGroup(field.group!, c)}
                     />
                   </div>
-                  <div className="option-pills">
+                  <div className="flex flex-wrap gap-1.5">
                     {groupFields.map((gd) => {
                       const gf = analysis.fields.find((y) => y.id === gd.fieldId)
+                      const selected = gd.include && gd.checked
                       return (
                         <button
                           key={gd.fieldId}
                           type="button"
-                          className={`option-pill ${gd.include && gd.checked ? 'selected' : ''} ${!gd.include ? 'muted' : ''}`}
                           onClick={() => onSelectGroupOption(field.group!, gd.fieldId)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                            selected
+                              ? 'border-accent bg-accent text-text-on-accent'
+                              : !gd.include
+                                ? 'border-border bg-transparent text-text-faint'
+                                : 'border-border bg-surface-sunken text-text-muted hover:text-text'
+                          }`}
                         >
                           {gf?.label || 'Option'}
                         </button>
@@ -101,8 +113,12 @@ export default function ReviewFillsDialog({
                     })}
                     <button
                       type="button"
-                      className={`option-pill none ${!anyChecked && groupIncluded ? 'selected' : ''}`}
                       onClick={() => onSelectGroupOption(field.group!, null)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        !anyChecked && groupIncluded
+                          ? 'border-accent bg-accent text-text-on-accent'
+                          : 'border-border bg-surface-sunken text-text-muted hover:text-text'
+                      }`}
                     >
                       None
                     </button>
@@ -111,81 +127,84 @@ export default function ReviewFillsDialog({
               )
             }
 
+            const suggestions =
+              field.kind === 'text'
+                ? suggestOptions(field, loadProfile(), field.options)
+                : []
+            const known = suggestions.includes(d.value)
+
             return (
               <motion.div
                 key={d.fieldId}
                 variants={staggerChild}
-                className={`review-row ${d.include ? '' : 'disabled'} ${lowConfidence && d.include ? 'low-confidence' : ''}`}
+                className={`rounded-xl border p-3 ${
+                  d.include ? 'border-border bg-surface-raised' : 'border-border bg-surface-sunken opacity-60'
+                } ${lowConfidence && d.include ? 'ring-1 ring-warning/40' : ''}`}
               >
-                <div className="review-main">
-                  <p className="review-label">
-                    {field.label || 'Unlabeled field'}
-                    {lowConfidence && d.include && !d.value && (
-                      <span className="low-confidence-chip">
-                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 9v4M12 17h.01" />
-                          <path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0z" />
-                        </svg>
-                        review
-                      </span>
-                    )}
-                    {lowConfidence && !d.value && (
-                      <span className="review-nomatch">
-                        {field.kind === 'checkbox'
-                          ? 'not matched — tick manually'
-                          : 'no match — type manually'}
-                      </span>
-                    )}
-                  </p>
-                  {field.kind === 'signature' ? (
-                    <p className="review-signature-note">
-                      Signature — never auto-filled. Sign by hand after printing.
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-text">
+                      {field.label || 'Unlabeled field'}
+                      {lowConfidence && d.include && !d.value && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--warning)_16%,transparent)] px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                          <Warning size={10} weight="fill" />
+                          review
+                        </span>
+                      )}
+                      {lowConfidence && !d.value && (
+                        <span className="text-xs font-normal text-text-faint">
+                          {field.kind === 'checkbox' ? 'tick manually' : 'type manually'}
+                        </span>
+                      )}
                     </p>
-                  ) : field.kind === 'checkbox' ? (
-                    <label className="review-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={d.include && d.checked}
-                        disabled={!d.include}
-                        onChange={(e) => onUpdateEdit(d.fieldId, { checked: e.target.checked })}
-                      />
-                      <span>{d.include ? (d.checked ? 'Checked' : 'Unchecked') : 'Skipped'}</span>
-                    </label>
-                  ) : field.kind === 'date' ? (
-                    <input
-                      className="review-input"
-                      type="date"
-                      value={d.value}
-                      disabled={!d.include}
-                      onChange={(e) => onUpdateEdit(d.fieldId, { value: e.target.value })}
-                    />
-                  ) : (
-                    (() => {
-                      const suggestions = suggestOptions(field, loadProfile(), field.options)
-                      if (suggestions.length === 0) {
-                        return (
+
+                    <div className="mt-2">
+                      {field.kind === 'signature' ? (
+                        <p className="text-xs text-text-muted">
+                          Signature. Never auto-filled, sign by hand after printing.
+                        </p>
+                      ) : field.kind === 'checkbox' ? (
+                        <label className="flex items-center gap-2 text-sm">
                           <input
-                            className="review-input"
-                            type="text"
-                            value={d.value}
+                            type="checkbox"
+                            className="size-4 accent-[var(--accent)]"
+                            checked={d.include && d.checked}
                             disabled={!d.include}
-                            placeholder="Type a value to fill"
-                            onChange={(e) => onUpdateEdit(d.fieldId, { value: e.target.value })}
+                            onChange={(e) => onUpdateEdit(d.fieldId, { checked: e.target.checked })}
                           />
-                        )
-                      }
-                      const known = suggestions.includes(d.value)
-                      return (
-                        <div className="review-suggest">
+                          <span className="text-text-muted">
+                            {d.include ? (d.checked ? 'Checked' : 'Unchecked') : 'Skipped'}
+                          </span>
+                        </label>
+                      ) : field.kind === 'date' ? (
+                        <input
+                          className={fieldInput}
+                          // A blank or ISO value uses the native date picker;
+                          // a value already formatted for the form (e.g.
+                          // "12/04/1991") stays an editable text field.
+                          type={!d.value || /^\d{4}-\d{2}-\d{2}$/.test(d.value) ? 'date' : 'text'}
+                          value={d.value}
+                          disabled={!d.include}
+                          onChange={(e) => onUpdateEdit(d.fieldId, { value: e.target.value })}
+                        />
+                      ) : suggestions.length === 0 ? (
+                        <input
+                          className={fieldInput}
+                          type="text"
+                          value={d.value}
+                          disabled={!d.include}
+                          placeholder="Type a value to fill"
+                          onChange={(e) => onUpdateEdit(d.fieldId, { value: e.target.value })}
+                        />
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
                           <select
-                            className="review-select"
+                            className={fieldInput}
                             disabled={!d.include}
                             value={known ? d.value : '__custom__'}
                             onChange={(e) => {
                               const v = e.target.value
-                              if (v !== '__custom__') {
-                                onUpdateEdit(d.fieldId, { value: v })
-                              }
+                              if (v !== '__custom__') onUpdateEdit(d.fieldId, { value: v })
                             }}
                           >
                             <option value="__custom__">Choose or type your own…</option>
@@ -194,7 +213,7 @@ export default function ReviewFillsDialog({
                             ))}
                           </select>
                           <input
-                            className="review-input"
+                            className={fieldInput}
                             type="text"
                             value={d.value}
                             disabled={!d.include}
@@ -202,24 +221,24 @@ export default function ReviewFillsDialog({
                             onChange={(e) => onUpdateEdit(d.fieldId, { value: e.target.value })}
                           />
                         </div>
-                      )
-                    })()
-                  )}
+                      )}
+                    </div>
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={d.include}
+                    onCheckedChange={(c) => onUpdateEdit(d.fieldId, { include: c })}
+                  />
                 </div>
-                <Switch
-                  size="sm"
-                  checked={d.include}
-                  onCheckedChange={(c) => onUpdateEdit(d.fieldId, { include: c })}
-                />
               </motion.div>
             )
           })}
         </motion.div>
 
-        <div className="wm-dialog-actions">
+        <DialogActions>
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-          <Button onClick={onApply}>Apply &amp; render</Button>
-        </div>
+          <Button onClick={onApply}>Apply and render</Button>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   )

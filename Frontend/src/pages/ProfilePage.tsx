@@ -1,21 +1,28 @@
-﻿import { useEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import type { ReactNode, ChangeEvent } from 'react'
+import { motion } from 'framer-motion'
 import { loadProfile, saveProfile, fetchProfileFromServer, saveProfileToServer } from '../lib/profile'
 import type { ProfileData } from '../lib/profile'
 import { getSession } from '../lib/api'
 import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
 import { staggerChild, staggerParent } from '../lib/motion'
+import { getThemePreference, setThemePreference } from '../lib/theme'
+import type { ThemePreference } from '../lib/theme'
+import {
+  User,
+  MapPin,
+  Briefcase,
+  IdentificationCard,
+  Plus,
+  X,
+  Check,
+  SignOut,
+  SpinnerGap,
+} from '../components/icons'
 
 interface ProfilePageProps {
   showToast: (msg: string) => void
   onLogout: () => void
-}
-
-interface CustomField {
-  label: string
-  value: string
 }
 
 type FieldKey = keyof Omit<ProfileData, 'customFields'>
@@ -43,17 +50,12 @@ const FIELD_LABELS: Record<FieldKey, string> = {
 
 const SECTIONS: Array<{
   title: string
-  icon: React.ReactNode
+  icon: ReactNode
   fields: Array<{ key: FieldKey; wide?: boolean; type?: string }>
 }> = [
   {
     title: 'Personal',
-    icon: (
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-    ),
+    icon: <User size={15} />,
     fields: [
       { key: 'fullName', wide: true },
       { key: 'firstName' },
@@ -67,12 +69,7 @@ const SECTIONS: Array<{
   },
   {
     title: 'Address',
-    icon: (
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z" />
-        <circle cx="12" cy="10" r="3" />
-      </svg>
-    ),
+    icon: <MapPin size={15} />,
     fields: [
       { key: 'address', wide: true },
       { key: 'city' },
@@ -83,25 +80,12 @@ const SECTIONS: Array<{
   },
   {
     title: 'Work',
-    icon: (
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-      </svg>
-    ),
+    icon: <Briefcase size={15} />,
     fields: [{ key: 'employer', wide: true }, { key: 'occupation' }],
   },
   {
     title: 'Identity',
-    icon: (
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="5" width="20" height="14" rx="2" />
-        <circle cx="8" cy="11" r="2" />
-        <path d="M5 17c.8-1.6 1.7-2.4 3-2.4s2.2.8 3 2.4" />
-        <line x1="14" y1="10" x2="19" y2="10" />
-        <line x1="14" y1="14" x2="19" y2="14" />
-      </svg>
-    ),
+    icon: <IdentificationCard size={15} />,
     fields: [{ key: 'nationality' }, { key: 'idNumber' }],
   },
 ]
@@ -113,6 +97,64 @@ function cleanCustomFields(profile: ProfileData): ProfileData {
       .map((f) => ({ label: f.label.trim(), value: f.value.trim() }))
       .filter((f) => f.label && f.value),
   }
+}
+
+const inputCls =
+  'h-10 w-full rounded-lg border border-border bg-surface-raised px-3 text-sm text-text outline-none transition-colors placeholder:text-text-faint focus:border-accent'
+
+function SaveIndicator({ state }: { state: SaveState }) {
+  if (state === 'idle') return null
+  const map: Record<Exclude<SaveState, 'idle'>, ReactNode> = {
+    dirty: <span className="text-text-muted">Editing…</span>,
+    saving: (
+      <span className="flex items-center gap-1.5 text-text-muted">
+        <SpinnerGap size={13} className="animate-spin" />
+        Saving…
+      </span>
+    ),
+    saved: (
+      <span className="flex items-center gap-1 text-success">
+        <Check size={13} weight="bold" />
+        Saved
+      </span>
+    ),
+    offline: <span className="text-warning">Saved locally, will sync</span>,
+  }
+  return <span className="text-xs font-medium">{map[state]}</span>
+}
+
+const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+]
+
+function ThemeControl() {
+  const [pref, setPref] = useState<ThemePreference>(getThemePreference)
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface-raised p-4">
+      <div>
+        <h2 className="font-display text-sm font-semibold">Appearance</h2>
+        <p className="mt-0.5 text-xs text-text-muted">Follows your device unless you pick one.</p>
+      </div>
+      <div className="flex shrink-0 rounded-full bg-surface-sunken p-0.5 text-[11px] font-medium">
+        {THEME_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => {
+              setPref(o.value)
+              setThemePreference(o.value)
+            }}
+            className={`rounded-full px-2.5 py-1 transition-colors ${
+              pref === o.value ? 'bg-surface-raised text-text shadow-sm' : 'text-text-muted'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
@@ -148,7 +190,6 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
       .finally(() => {
         if (!cancelled) {
           setLoading(false)
-          // let effects settle before enabling autosave
           window.setTimeout(() => {
             hydratedRef.current = true
           }, 300)
@@ -179,7 +220,6 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
     }
   }
 
-  // Debounced autosave — fires ~900ms after the last keystroke
   const scheduleAutosave = () => {
     if (!hydratedRef.current || loading) return
     setSaveState('dirty')
@@ -190,7 +230,6 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
     }, 900)
   }
 
-  // Flush a pending save when leaving the tab/page
   useEffect(() => {
     return () => {
       if (timerRef.current !== null) {
@@ -201,12 +240,12 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const update = (key: FieldKey) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const update = (key: FieldKey) => (e: ChangeEvent<HTMLInputElement>) => {
     setProfile((prev) => ({ ...prev, [key]: e.target.value }))
     scheduleAutosave()
   }
 
-  const updateCustom = (index: number, patch: Partial<CustomField>) => {
+  const updateCustom = (index: number, patch: Partial<{ label: string; value: string }>) => {
     setProfile((prev) => ({
       ...prev,
       customFields: prev.customFields.map((f, i) => (i === index ? { ...f, ...patch } : f)),
@@ -231,66 +270,19 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
   }
 
   return (
-    <div className="profile-page">
-      <header className="profile-head">
+    <div className="flex flex-1 flex-col gap-5 pb-4">
+      <header className="flex items-start justify-between gap-3">
         <div>
-          <h1>My Details</h1>
-          <p>These details are used to auto-fill scanned forms.</p>
+          <h1 className="font-display text-xl font-semibold tracking-tight">My details</h1>
+          <p className="mt-0.5 text-sm text-text-muted">
+            Used to auto-fill scanned forms. Saved automatically.
+          </p>
         </div>
-        <AnimatePresence mode="wait">
-          {saveState === 'dirty' && (
-            <motion.span
-              key="dirty"
-              className="save-indicator saving"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              Editing…
-            </motion.span>
-          )}
-          {saveState === 'saving' && (
-            <motion.span
-              key="saving"
-              className="save-indicator saving"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <span className="btn-spinner" style={{ borderTopColor: 'var(--text-muted)', borderColor: 'rgba(33,29,25,0.15)' }} />
-              Saving…
-            </motion.span>
-          )}
-          {saveState === 'saved' && (
-            <motion.span
-              key="saved"
-              className="save-indicator"
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, transition: { delay: 1.2 } }}
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Saved
-            </motion.span>
-          )}
-          {saveState === 'offline' && (
-            <motion.span
-              key="offline"
-              className="save-indicator offline"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              Saved locally — will sync later
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <SaveIndicator state={saveState} />
       </header>
 
       <motion.div
-        className="profile-sections"
+        className="flex flex-col gap-4"
         variants={staggerParent}
         initial="initial"
         animate="animate"
@@ -298,23 +290,32 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
         {SECTIONS.map((section) => {
           const filledCount = section.fields.filter((f) => profile[f.key].trim()).length
           return (
-            <motion.section key={section.title} variants={staggerChild} className="profile-section-card">
-              <div className="profile-section-head">
-                <span className="profile-section-icon">{section.icon}</span>
-                <h2 className="profile-section-title">{section.title}</h2>
-                <span className="profile-section-count">
+            <motion.section
+              key={section.title}
+              variants={staggerChild}
+              className="rounded-2xl border border-border bg-surface-raised p-4"
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <span className="grid size-7 place-items-center rounded-lg bg-accent-soft text-accent">
+                  {section.icon}
+                </span>
+                <h2 className="flex-1 font-display text-sm font-semibold">{section.title}</h2>
+                <span className="text-xs text-text-faint">
                   {filledCount}/{section.fields.length}
                 </span>
               </div>
-              <div className="profile-section-body">
+              <div className="grid grid-cols-2 gap-3">
                 {section.fields.map(({ key, wide, type }) => (
-                  <div key={key} className={`field-cell ${wide ? 'field-wide' : ''}`}>
-                    <Label htmlFor={`profile-${key}`}>{FIELD_LABELS[key]}</Label>
-                    <Input
+                  <div key={key} className={`flex flex-col gap-1 ${wide ? 'col-span-2' : ''}`}>
+                    <label htmlFor={`profile-${key}`} className="text-xs font-medium text-text-muted">
+                      {FIELD_LABELS[key]}
+                    </label>
+                    <input
                       id={`profile-${key}`}
+                      className={inputCls}
                       value={profile[key]}
                       onChange={update(key)}
-                      placeholder="—"
+                      placeholder="Not set"
                       type={type ?? 'text'}
                       autoCapitalize={type === 'date' ? undefined : 'words'}
                       spellCheck={false}
@@ -326,32 +327,33 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
           )
         })}
 
-        <motion.section variants={staggerChild} className="profile-section-card">
-          <div className="profile-section-head">
-            <span className="profile-section-icon">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+        <motion.section
+          variants={staggerChild}
+          className="rounded-2xl border border-border bg-surface-raised p-4"
+        >
+          <div className="mb-3 flex items-center gap-2">
+            <span className="grid size-7 place-items-center rounded-lg bg-accent-soft text-accent">
+              <Plus size={15} />
             </span>
-            <h2 className="profile-section-title">Custom fields</h2>
-            <span className="profile-section-count">{profile.customFields.length}</span>
+            <h2 className="flex-1 font-display text-sm font-semibold">Custom fields</h2>
+            <span className="text-xs text-text-faint">{profile.customFields.length}</span>
           </div>
-          <div className="profile-section-body" style={{ display: 'block' }}>
-            <p className="profile-hint">
-              Add your own fields (e.g. Passport Number). These are also matched when auto-filling forms.
-            </p>
+          <p className="mb-3 text-xs text-text-muted">
+            Add your own fields, e.g. Passport Number. These are also matched when auto-filling.
+          </p>
+          <div className="flex flex-col gap-2">
             {profile.customFields.map((field, index) => (
-              <div key={index} className="custom-field-row">
-                <Input
-                  className="custom-field-label"
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  className={`${inputCls} flex-1`}
                   value={field.label}
                   onChange={(e) => updateCustom(index, { label: e.target.value })}
-                  placeholder="Field label (e.g. Passport Number)"
+                  placeholder="Field label"
                   autoCapitalize="words"
                   spellCheck={false}
                 />
-                <Input
-                  className="custom-field-value"
+                <input
+                  className={`${inputCls} flex-1`}
                   value={field.value}
                   onChange={(e) => updateCustom(index, { value: e.target.value })}
                   placeholder="Value"
@@ -359,36 +361,28 @@ export default function ProfilePage({ showToast, onLogout }: ProfilePageProps) {
                 />
                 <button
                   type="button"
-                  className="icon-btn custom-field-remove"
                   onClick={() => removeCustomField(index)}
                   aria-label={`Remove ${field.label || 'field'}`}
-                  title="Remove field"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg text-text-faint transition-colors hover:bg-danger-soft hover:text-danger"
                 >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
+                  <X size={16} />
                 </button>
               </div>
             ))}
-            <Button variant="secondary" className="custom-field-add" onClick={addCustomField}>
-              + Add field
+            <Button variant="secondary" className="mt-1 w-full" onClick={addCustomField}>
+              <Plus size={16} />
+              Add field
             </Button>
           </div>
         </motion.section>
       </motion.div>
 
-      <div className="profile-footer">
-        <p className="profile-hint">Changes save automatically.</p>
-        <Button variant="secondary" className="logout-btn" onClick={onLogout}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16 17 21 12 16 7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg>
-          Log out
-        </Button>
-      </div>
+      <ThemeControl />
+
+      <Button variant="outline" className="w-full" onClick={onLogout}>
+        <SignOut size={16} />
+        Log out
+      </Button>
     </div>
   )
 }

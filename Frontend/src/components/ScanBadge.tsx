@@ -1,10 +1,14 @@
-import { Badge } from './ui/badge'
 import type { ScanRecord } from '../lib/api'
 
 export default function ScanBadge({ scan }: { scan: ScanRecord }) {
-  return scan.filled_at ? (
-    <Badge className="scan-badge">Filled</Badge>
-  ) : (
-    <Badge variant="secondary" className="scan-badge">OCR</Badge>
+  const filled = !!scan.filled_at
+  return (
+    <span
+      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+        filled ? 'bg-accent-soft text-accent-hover' : 'bg-surface-sunken text-text-muted'
+      }`}
+    >
+      {filled ? 'Filled' : 'OCR'}
+    </span>
   )
 }

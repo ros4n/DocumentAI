@@ -1,157 +1,71 @@
-import { useEffect, useRef, useState } from 'react'
-import type { ChangeEvent } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useEffect, useState } from 'react'
+import { MotionConfig, motion } from 'framer-motion'
 import { toast } from 'sonner'
+
 import ProfilePage from './ProfilePage'
+import CaptureFlow from './home/CaptureFlow'
 import TabBar from '../components/TabBar'
-import CaptureView from '../components/CaptureView'
 import type { Tab } from '../components/TabBar'
 import ScansLibrary from '../components/ScansLibrary'
 import HistoryList from '../components/HistoryList'
-import FullscreenImageViewer from '../components/FullscreenImageViewer'
-import FieldReviewOverlay from '../components/FieldReviewOverlay'
-import CropImage from '../components/CropImage'
-import OcrResultDialog from '../components/dialogs/OcrResultDialog'
-import ReviewFillsDialog from '../components/dialogs/ReviewFillsDialog'
-import FillResultDialog from '../components/dialogs/FillResultDialog'
 import ScanDetailDialog from '../components/dialogs/ScanDetailDialog'
 import EngineSettingsDialog from '../components/dialogs/EngineSettingsDialog'
+import FullscreenImageViewer from '../components/FullscreenImageViewer'
 import { Avatar, AvatarFallback } from '../components/ui/avatar'
-import { analyzeForm, analyzeDetectedFields } from '../lib/formFill'
-import type { FillDecision, FormAnalysis } from '../lib/formFill'
-import { detectFieldsWithImage } from '../lib/fieldDetect'
-import type { DetectionWithImage } from '../lib/fieldDetect'
-import type { DetectedField } from '../lib/types'
-import { renderFilledForm } from '../lib/renderFill'
-import { hasProfileData, loadProfile } from '../lib/profile'
+import { Gear } from '../components/icons'
 import {
-  apiCreateScan,
   apiDeleteScan,
   apiListScans,
   apiRenameScan,
-  apiSetScanFilled,
   getSession,
 } from '../lib/api'
 import type { ScanRecord } from '../lib/api'
-import { getLlmConfig, llmConfigured, listModels, setLlmConfig, testConnection } from '../lib/llm'
-import type { LlmConfig } from '../lib/llm'
-import {
-  dataUrlToFile,
-  extractTextFromImage,
-  extractTextFromPdf,
-  getPdfFirstPage,
-  getServerUrl,
-  setServerUrl,
-  getServerKey,
-  setServerKey,
-  testOcrServer,
-} from '../lib/ocr'
-import type { OcrResult } from '../lib/ocr'
-import { downscaleDataUrl } from '../lib/image'
-import { defaultScanName } from '../lib/scanFormat'
+import { useEngineSettings } from '../hooks/useEngineSettings'
 
 interface HomePageProps {
   onLogout: () => void
 }
 
-type FullscreenImageState = {
-  originalSrc: string
-  originalAlt: string
-  filledSrc: string
-  filledAlt: string
-  title: string
-  subtitle: string
-}
-
 const TAB_INDEX: Record<Tab, number> = { home: 0, scans: 1, history: 2, profile: 3 }
 
-const tabVariants = {
-  initial: (dir: number) => ({ opacity: 0, x: dir * 26 }),
-  animate: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const },
-  },
-  exit: (dir: number) => ({
-    opacity: 0,
-    x: dir * -18,
-    transition: { duration: 0.16 },
-  }),
-}
+// Enter-only, keyed on the active tab. AnimatePresence exit is not used
+// here: framer-motion 12.43 + React 19 leaves exiting children mounted
+// under `mode="wait"`, which strands the previous panel on screen.
+const tabTransition = { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const }
 
 export default function HomePage({ onLogout }: HomePageProps) {
   const session = getSession()
   const userName = session?.user?.name?.trim() ?? ''
   const firstName = userName.split(/\s+/)[0] ?? ''
   const avatarLetter = (userName[0] ?? 'S').toUpperCase()
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const pdfInputRef = useRef<HTMLInputElement>(null)
-  /** Original source bytes for the field-detection pipeline (PDF → Tier 0) */
-  const sourceFileRef = useRef<File | null>(null)
-  const sourceTypeRef = useRef<'image' | 'pdf'>('image')
-  const [streamActive, setStreamActive] = useState(false)
-  const [cameraError, setCameraError] = useState('')
-  const [captured, setCaptured] = useState<string | null>(null)
+
   const [tab, setTab] = useState<Tab>('home')
   const [tabDir, setTabDir] = useState(0)
-  const [ocrBusy, setOcrBusy] = useState(false)
-  const [ocrStatus, setOcrStatus] = useState('')
-  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [serverUrlInput, setServerUrlInput] = useState(getServerUrl())
-  const [serverKeyInput, setServerKeyInput] = useState(getServerKey())
-  const [ocrTesting, setOcrTesting] = useState(false)
-  const [ocrTestOk, setOcrTestOk] = useState(false)
-  const [ocrTestMsg, setOcrTestMsg] = useState('')
-  const [llm, setLlm] = useState<LlmConfig>(getLlmConfig)
-  const [llmTesting, setLlmTesting] = useState(false)
-  const [llmTestOk, setLlmTestOk] = useState(false)
-  const [llmTestMsg, setLlmTestMsg] = useState('')
-  const [modelOptions, setModelOptions] = useState<string[]>([])
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState('')
-  const [fillBusy, setFillBusy] = useState(false)
-  const [fillStatus, setFillStatus] = useState('')
-  const [analysis, setAnalysis] = useState<FormAnalysis | null>(null)
-  const [edits, setEdits] = useState<Array<FillDecision & { include: boolean }>>([])
-  const [detection, setDetection] = useState<DetectionWithImage | null>(null)
-  const [filledImage, setFilledImage] = useState<string | null>(null)
-  const [fillSkipped, setFillSkipped] = useState<string[]>([])
+
   const [scans, setScans] = useState<ScanRecord[]>([])
   const [scanDetail, setScanDetail] = useState<ScanRecord | null>(null)
+  const [nameDraft, setNameDraft] = useState('')
   const [historySearch, setHistorySearch] = useState('')
   const [historyType, setHistoryType] = useState('')
   const [historyStatus, setHistoryStatus] = useState('')
-  const [activeScanId, setActiveScanId] = useState<number | null>(null)
-  const [filledSaved, setFilledSaved] = useState(false)
-  const [nameDraft, setNameDraft] = useState('')
-  const [cropOpen, setCropOpen] = useState(false)
-  const [resultOpen, setResultOpen] = useState(false)
-  const [fullscreenImage, setFullscreenImage] = useState<FullscreenImageState | null>(null)
+  const [detailInspect, setDetailInspect] = useState<ScanRecord | null>(null)
+
+  const settings = useEngineSettings()
 
   useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop())
-    }
-  }, [])
-
-  useEffect(() => {
-    const session = getSession()
-    if (!session) return
+    const s = getSession()
+    if (!s) return
     let cancelled = false
-    apiListScans(session.token)
+    apiListScans(s.token)
       .then((list) => {
         if (!cancelled) setScans(list)
       })
       .catch(() => {
-        if (!cancelled) showToast('Could not load scan history')
+        if (!cancelled) toast('Could not load scan history')
       })
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -164,438 +78,11 @@ export default function HomePage({ onLogout }: HomePageProps) {
     setTab(next)
   }
 
-  const saveScanToHistory = async (
-    preview: string,
-    result: OcrResult,
-    scanType: 'image' | 'pdf',
-    source: 'camera' | 'upload' | 'pdf'
-  ) => {
-    const session = getSession()
-    if (!session) return
-    try {
-      const record = await apiCreateScan(session.token, {
-        scan_type: scanType,
-        source,
-        name: defaultScanName(new Date().toISOString()),
-        preview_image: preview,
-        ocr_text: result.text,
-        ocr_engine: result.engine,
-        pages: result.pages,
-      })
-      setActiveScanId(record.id)
-      setScans((prev) => [record, ...prev])
-    } catch {
-      showToast('Scan saved on device only (server offline)')
-    }
-  }
-
-  const startCamera = async () => {
-    setCameraError('')
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-        audio: false,
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-      }
-      setStreamActive(true)
-    } catch {
-      setStreamActive(false)
-      setCameraError('Camera unavailable. Upload an image instead.')
-    }
-  }
-
-  const capture = () => {
-    const video = videoRef.current
-    if (!video || !streamActive) return
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    canvas.getContext('2d')!.drawImage(video, 0, 0)
-    sourceFileRef.current = null
-    sourceTypeRef.current = 'image'
-    setCaptured(canvas.toDataURL('image/jpeg', 0.92))
-  }
-
-  const handleUpload = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    sourceFileRef.current = file
-    sourceTypeRef.current = 'image'
-    const reader = new FileReader()
-    reader.onload = () => setCaptured(reader.result as string)
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
-
-  const showToast = (msg: string) => {
-    toast(msg)
-  }
-
-  const saveScan = () => {
-    if (!captured) return
-    const a = document.createElement('a')
-    a.href = captured
-    a.download = `snappy-scan-${Date.now()}.jpg`
-    a.click()
-    showToast('Scan saved')
-  }
-
-  const shareScan = async () => {
-    if (!captured) return
-    const blob = await (await fetch(captured)).blob()
-    const file = new File([blob], 'scan.jpg', { type: 'image/jpeg' })
-    if (navigator.share) {
-      try {
-        await navigator.share({ files: [file], title: 'Snappy scan' })
-      } catch {
-        /* user cancelled */
-      }
-    } else {
-      try {
-        await navigator.clipboard.writeText(captured)
-        showToast('Image copied to clipboard')
-      } catch {
-        showToast('Sharing not supported on this device')
-      }
-    }
-  }
-
-  const retake = () => {
-    sourceFileRef.current = null
-    sourceTypeRef.current = 'image'
-    setCaptured(null)
-  }
-
-  const extractFromCapture = async () => {
-    if (!captured || ocrBusy) return
-    setOcrBusy(true)
-    setOcrStatus('Reading text…')
-    try {
-      const result = await extractTextFromImage(captured)
-      setOcrResult(result)
-      if (result.serverError) {
-        showToast('Server failed — used on-device OCR')
-      }
-      try {
-        const preview = await downscaleDataUrl(captured, 480)
-        await saveScanToHistory(preview, result, 'image', streamActive ? 'camera' : 'upload')
-      } catch {
-        /* history save is best-effort */
-      }
-    } catch (err) {
-      showToast((err as Error).message)
-    } finally {
-      setOcrBusy(false)
-      setOcrStatus('')
-    }
-  }
-
-  const handlePdfUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file || ocrBusy) return
-    sourceFileRef.current = file
-    sourceTypeRef.current = 'pdf'
-    setOcrBusy(true)
-    setOcrStatus('Loading PDF…')
-    try {
-      const result = await extractTextFromPdf(file, (page, total) => {
-        setOcrStatus(`Reading page ${page} of ${total}…`)
-      })
-      setOcrResult(result)
-      if (result.serverError) {
-        showToast('Server failed — used on-device OCR')
-      }
-      try {
-        const firstPage = await getPdfFirstPage(file)
-        const preview = await downscaleDataUrl(firstPage, 480)
-        await saveScanToHistory(preview, result, 'pdf', 'pdf')
-      } catch {
-        /* history save is best-effort */
-      }
-    } catch (err) {
-      showToast((err as Error).message)
-    } finally {
-      setOcrBusy(false)
-      setOcrStatus('')
-    }
-  }
-
-  const startFill = async () => {
-    if (!captured || fillBusy) return
-    const profile = loadProfile()
-    if (!hasProfileData(profile)) {
-      showToast('Save your details in the Profile tab first')
-      changeTab('profile')
-      return
-    }
-    setFillBusy(true)
-    setFillStatus('Detecting fields…')
-    try {
-      // Unified detection pipeline — PDF bytes enable Tier 0 AcroForm,
-      // everything else rasterizes/uses pixels for Tier 1 → Tier 2.
-      let file = sourceFileRef.current
-      let inputType = sourceTypeRef.current
-      if (!file || inputType === 'image') {
-        file = dataUrlToFile(captured, 'scan.jpg') // crop/retake-safe: use current pixels
-        inputType = 'image'
-      }
-      const result = await detectFieldsWithImage(file, inputType, (stage) => {
-        setFillStatus(stage)
-      })
-
-      if (
-        result.detection.fields.length === 0 &&
-        result.detection.tierUsed !== 'acroform'
-      ) {
-        // Nothing detected — fall back to the legacy on-image analysis so
-        // the flow never dead-ends on a hard zero.
-        setFillStatus('Analyzing form…')
-        const legacy = await analyzeForm(captured, profile)
-        setAnalysis(legacy)
-        setEdits(
-          legacy.decisions.map((d) => ({
-            ...d,
-            include: true,
-          }))
-        )
-        if (legacy.error) {
-          showToast('AI failed — used on-device matching')
-        }
-        return
-      }
-
-      setDetection(result)
-    } catch (err) {
-      showToast((err as Error).message)
-    } finally {
-      setFillBusy(false)
-      setFillStatus('')
-    }
-  }
-
-  const confirmDetectedFields = async (fields: DetectedField[]) => {
-    if (!detection) return
-    setDetection(null)
-    setFillBusy(true)
-    setFillStatus('Matching profile values…')
-    try {
-      const merged = { ...detection.detection, fields }
-      const result = await analyzeDetectedFields(merged, loadProfile())
-      setAnalysis(result)
-      setEdits(
-        result.decisions.map((d) => ({
-          ...d,
-          include: true,
-        }))
-      )
-      if (result.error) {
-        showToast('AI failed — used keyword matching')
-      }
-    } catch (err) {
-      showToast((err as Error).message)
-    } finally {
-      setFillBusy(false)
-      setFillStatus('')
-    }
-  }
-
-  const applyFill = async () => {
-    if (!analysis || !captured) return
-    setFillBusy(true)
-    setFillStatus('Rendering filled form…')
-    try {
-      const cleanDecisions: FillDecision[] = edits
-        .filter((d) => d.include)
-        .map(({ fieldId, value, checked, confidence }) => ({
-          fieldId,
-          value,
-          checked,
-          confidence,
-        }))
-      const filled = await renderFilledForm(captured, analysis.fields, cleanDecisions)
-      setFilledImage(filled.dataUrl)
-      setFillSkipped(filled.skipped)
-      setFilledSaved(false)
-      setResultOpen(true)
-    } catch (err) {
-      showToast((err as Error).message)
-    } finally {
-      setFillBusy(false)
-      setFillStatus('')
-    }
-  }
-
-  const saveFilledToHistory = async () => {
-    if (!filledImage || filledSaved) return
-    const session = getSession()
-    if (!session) {
-      showToast('Log in to save scans to history')
-      return
-    }
-    setFillBusy(true)
-    setFillStatus('Saving filled form…')
-    try {
-      const storedImage = await downscaleDataUrl(filledImage, 1600, 0.85)
-      if (activeScanId) {
-        const updated = await apiSetScanFilled(session.token, activeScanId, storedImage)
-        setScans((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
-      } else {
-        const preview = captured ? await downscaleDataUrl(captured, 480) : ''
-        const record = await apiCreateScan(session.token, {
-          scan_type: 'image',
-          source: streamActive ? 'camera' : 'upload',
-          name: defaultScanName(new Date().toISOString()),
-          preview_image: preview,
-          filled_image: storedImage,
-        })
-        setActiveScanId(record.id)
-        setScans((prev) => [record, ...prev])
-      }
-      setFilledSaved(true)
-      showToast('Filled scan saved to history')
-    } catch {
-      showToast('Could not save — server offline')
-    } finally {
-      setFillBusy(false)
-      setFillStatus('')
-    }
-  }
-
-  const updateEdit = (fieldId: string, patch: Partial<FillDecision & { include: boolean }>) => {
-    setEdits((prev) =>
-      prev.map((d) => (d.fieldId === fieldId ? { ...d, ...patch } : d))
-    )
-  }
-
-  const selectGroupOption = (group: string, fieldId: string | null) => {
-    if (!analysis) return
-    setEdits((prev) =>
-      prev.map((d) => {
-        const f = analysis.fields.find((x) => x.id === d.fieldId)
-        if (f?.group !== group) return d
-        const selected = d.fieldId === fieldId
-        return {
-          ...d,
-          checked: selected,
-          value: '',
-          include: selected ? true : d.include,
-          confidence: selected ? Math.max(d.confidence, 0.7) : d.confidence,
-        }
-      })
-    )
-  }
-
-  const toggleGroup = (group: string, include: boolean) => {
-    if (!analysis) return
-    setEdits((prev) =>
-      prev.map((x) => {
-        const f2 = analysis.fields.find((y) => y.id === x.fieldId)
-        if (f2?.group !== group) return x
-        return { ...x, include }
-      })
-    )
-  }
-
-  const closeFillFlow = () => {
-    setAnalysis(null)
-    setEdits([])
-    setDetection(null)
-    setFilledImage(null)
-    setFillSkipped([])
-    setFilledSaved(false)
-    setResultOpen(false)
-  }
-
-  const openFullscreenImage = (next: FullscreenImageState) => {
-    setFullscreenImage(next)
-  }
-
-  const copyText = async () => {
-    if (!ocrResult) return
-    try {
-      await navigator.clipboard.writeText(ocrResult.text)
-      showToast('Text copied')
-    } catch {
-      showToast('Copy not supported on this device')
-    }
-  }
-
-  const downloadText = () => {
-    if (!ocrResult) return
-    const blob = new Blob([ocrResult.text], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `snappy-ocr-${Date.now()}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const openSettings = () => {
-    setServerUrlInput(getServerUrl())
-    setServerKeyInput(getServerKey())
-    setLlm(getLlmConfig())
-    setSettingsOpen(true)
-  }
-
-  const loadModels = async () => {
-    setModelsLoading(true)
-    setModelsError('')
-    try {
-      const ids = await listModels(llm)
-      setModelOptions(ids)
-    } catch (err) {
-      setModelsError((err as Error).message)
-    } finally {
-      setModelsLoading(false)
-    }
-  }
-
-  const saveSettings = () => {
-    setServerUrl(serverUrlInput)
-    setServerKey(serverKeyInput)
-    setLlmConfig(llm)
-    setSettingsOpen(false)
-    showToast('Settings saved')
-  }
-
-  const testLlm = async () => {
-    setLlmTesting(true)
-    setLlmTestOk(false)
-    setLlmTestMsg('')
-    try {
-      const reply = await testConnection(llm)
-      setLlmTestOk(true)
-      setLlmTestMsg(reply.includes('OK') ? 'Connected — model replied OK' : `Connected — reply: ${reply}`)
-    } catch (err) {
-      setLlmTestOk(false)
-      setLlmTestMsg((err as Error).message)
-    } finally {
-      setLlmTesting(false)
-    }
-  }
-
-  const testOcr = async () => {
-    setOcrTesting(true)
-    setOcrTestOk(false)
-    setOcrTestMsg('')
-    try {
-      const reply = await testOcrServer()
-      setOcrTestOk(true)
-      setOcrTestMsg(reply.includes('OK') ? 'Connected — server replied OK' : `Connected — reply: ${reply}`)
-    } catch (err) {
-      setOcrTestOk(false)
-      setOcrTestMsg((err as Error).message)
-    } finally {
-      setOcrTesting(false)
-    }
-  }
-
-  const engine: 'server' | 'on-device' = serverUrlInput ? 'server' : 'on-device'
+  const upsertScan = (record: ScanRecord) =>
+    setScans((prev) => {
+      const exists = prev.some((s) => s.id === record.id)
+      return exists ? prev.map((s) => (s.id === record.id ? record : s)) : [record, ...prev]
+    })
 
   const filteredScans = scans.filter((s) => {
     const q = historySearch.trim().toLowerCase()
@@ -607,17 +94,29 @@ export default function HomePage({ onLogout }: HomePageProps) {
   })
 
   const deleteScan = async (id: number) => {
-    const session = getSession()
+    const s = getSession()
     if (!window.confirm('Delete this scan?')) return
-    if (session) {
+    if (s) {
       try {
-        await apiDeleteScan(session.token, id)
+        await apiDeleteScan(s.token, id)
       } catch {
-        showToast('Could not delete on server')
+        toast('Could not delete on server')
       }
     }
-    setScans((prev) => prev.filter((s) => s.id !== id))
+    setScans((prev) => prev.filter((x) => x.id !== id))
     setScanDetail((prev) => (prev && prev.id === id ? null : prev))
+  }
+
+  const renameScan = async (id: number, name: string) => {
+    const s = getSession()
+    if (!s) return
+    try {
+      const updated = await apiRenameScan(s.token, id, name.trim())
+      setScans((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      setScanDetail((prev) => (prev && prev.id === updated.id ? updated : prev))
+    } catch {
+      toast('Could not rename — server offline')
+    }
   }
 
   const downloadImage = (dataUrl: string, name: string) => {
@@ -627,92 +126,54 @@ export default function HomePage({ onLogout }: HomePageProps) {
     a.click()
   }
 
-  const renameScan = async (id: number, name: string) => {
-    const session = getSession()
-    if (!session) return
-    try {
-      const updated = await apiRenameScan(session.token, id, name.trim())
-      setScans((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
-      setScanDetail((prev) => (prev && prev.id === updated.id ? updated : prev))
-    } catch {
-      showToast('Could not rename — server offline')
-    }
-  }
-
   return (
-    <div className="home-page">
-      <header className="home-header">
-        <div className="home-user">
-          <Avatar size="lg" className="avatar">
-            <AvatarFallback>{avatarLetter}</AvatarFallback>
+    <MotionConfig reducedMotion="user">
+    <div className="flex min-h-[100dvh] flex-col">
+      <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-border bg-surface-page/90 px-5 py-3 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <Avatar
+            size="lg"
+            className="grid size-10 place-items-center rounded-full bg-[image:var(--accent-grad)] text-[15px] font-bold text-text-on-accent shadow-sm"
+          >
+            <AvatarFallback className="bg-transparent text-inherit">{avatarLetter}</AvatarFallback>
           </Avatar>
-          <div>
-            <p className="greeting">Hey {firstName || 'there'}</p>
-            <div className="home-brand">
-              <img className="home-logo" src="/icon.svg" alt="" />
-              <p className="home-title">Snappy Scanner</p>
+          <div className="leading-tight">
+            <p className="text-xs text-text-muted">Hey {firstName || 'there'}</p>
+            <div className="flex items-center gap-1.5">
+              <img className="h-[18px] w-5" src="/icon.svg" alt="" />
+              <p className="font-display text-[17px] font-semibold tracking-tight">Snappy</p>
             </div>
           </div>
         </div>
-        <div className="header-actions">
-          <button className="icon-btn" onClick={openSettings} aria-label="OCR settings" title="OCR settings">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-        </div>
+        <button
+          className="grid size-10 place-items-center rounded-full border border-border bg-surface-raised text-text-muted transition-colors hover:border-border-strong hover:text-accent"
+          onClick={settings.openSettings}
+          aria-label="OCR settings"
+          title="OCR settings"
+        >
+          <Gear size={20} />
+        </button>
       </header>
 
-      <main className="home-content">
-        <AnimatePresence mode="wait" custom={tabDir} initial={false}>
+      <main className="flex flex-1 flex-col px-5 pt-2 [padding-bottom:calc(84px+env(safe-area-inset-bottom))]">
+        {/* Home stays mounted so an in-progress capture and the camera
+            stream survive a detour to another tab. */}
+        <div className={tab === 'home' ? 'flex flex-1 flex-col' : 'hidden'}>
+          <CaptureFlow
+            onScanCreated={upsertScan}
+            onScanUpdated={upsertScan}
+            onNeedProfile={() => changeTab('profile')}
+          />
+        </div>
+
+        {tab !== 'home' && (
           <motion.div
             key={tab}
-            className="tab-panel"
-            custom={tabDir}
-            variants={tabVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
+            className="flex flex-1 flex-col"
+            initial={{ opacity: 0, x: tabDir >= 0 ? 22 : -22 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={tabTransition}
           >
-            {tab === 'home' && (
-              <>
-                <div className="engine-status">
-                  <span className={`status-badge ${serverUrlInput ? 'ok' : ''}`}>
-                    {serverUrlInput ? 'OCR: Unlimited-OCR server' : 'OCR: on-device (Tesseract)'}
-                  </span>
-                  <span className={`status-badge ${llmConfigured() ? 'llm' : ''}`}>
-                    {llmConfigured()
-                      ? `AI: ${llm.url.includes('google') ? 'Gemini' : 'configured'}`
-                      : 'AI: not set up'}
-                  </span>
-                </div>
-
-                <CaptureView
-                  videoRef={videoRef}
-                  fileInputRef={fileInputRef}
-                  pdfInputRef={pdfInputRef}
-                  streamActive={streamActive}
-                  cameraError={cameraError}
-                  captured={captured}
-                  ocrBusy={ocrBusy}
-                  fillBusy={fillBusy}
-                  fillStatus={fillStatus}
-                  ocrStatus={ocrStatus}
-                  onStartCamera={startCamera}
-                  onCapture={capture}
-                  onRetake={retake}
-                  onSaveScan={saveScan}
-                  onShareScan={shareScan}
-                  onCrop={() => setCropOpen(true)}
-                  onExtractText={extractFromCapture}
-                  onStartFill={startFill}
-                  onImageUpload={handleUpload}
-                  onPdfUpload={handlePdfUpload}
-                />
-              </>
-            )}
-
             {tab === 'scans' && (
               <ScansLibrary
                 scans={scans}
@@ -738,90 +199,10 @@ export default function HomePage({ onLogout }: HomePageProps) {
               />
             )}
 
-            {tab === 'profile' && <ProfilePage showToast={showToast} onLogout={onLogout} />}
+            {tab === 'profile' && <ProfilePage showToast={toast} onLogout={onLogout} />}
           </motion.div>
-        </AnimatePresence>
+        )}
       </main>
-
-      {ocrResult && (
-        <OcrResultDialog
-          result={ocrResult}
-          onClose={() => setOcrResult(null)}
-          onCopy={copyText}
-          onDownload={downloadText}
-        />
-      )}
-
-      {detection && (
-        <FieldReviewOverlay
-          imageDataUrl={detection.imageDataUrl}
-          detection={detection.detection}
-          onConfirm={confirmDetectedFields}
-          onCancel={() => setDetection(null)}
-        />
-      )}
-
-      {analysis && !resultOpen && (
-        <ReviewFillsDialog
-          analysis={analysis}
-          edits={edits}
-          onUpdateEdit={updateEdit}
-          onSelectGroupOption={selectGroupOption}
-          onToggleGroup={toggleGroup}
-          onCancel={closeFillFlow}
-          onApply={applyFill}
-        />
-      )}
-
-      {resultOpen && filledImage && (
-        <FillResultDialog
-          analysis={analysis}
-          originalSrc={captured ?? ''}
-          filledImage={filledImage}
-          fillSkipped={fillSkipped}
-          filledSaved={filledSaved}
-          fillBusy={fillBusy}
-          onClose={closeFillFlow}
-          onShare={async () => {
-            if (!filledImage) return
-            const blob = await (await fetch(filledImage)).blob()
-            const file = new File([blob], 'filled-form.jpg', { type: 'image/jpeg' })
-            if (navigator.share) {
-              try {
-                await navigator.share({ files: [file], title: 'Snappy filled form' })
-              } catch {
-                /* user cancelled */
-              }
-            } else {
-              try {
-                await navigator.clipboard.writeText(filledImage)
-                showToast('Image copied to clipboard')
-              } catch {
-                showToast('Sharing not supported on this device')
-              }
-            }
-          }}
-          onDownload={() => {
-            if (!filledImage) return
-            downloadImage(filledImage, `snappy-filled-${Date.now()}.jpg`)
-            showToast('Filled form saved')
-          }}
-          onSaveToHistory={saveFilledToHistory}
-          onInspect={
-            captured && filledImage
-              ? () =>
-                  openFullscreenImage({
-                    originalSrc: captured,
-                    originalAlt: 'Original form',
-                    filledSrc: filledImage,
-                    filledAlt: 'Filled form',
-                    title: 'Form preview',
-                    subtitle: 'Inspect the original and filled versions side by side',
-                  })
-              : undefined
-          }
-        />
-      )}
 
       {scanDetail && (
         <ScanDetailDialog
@@ -833,73 +214,52 @@ export default function HomePage({ onLogout }: HomePageProps) {
           onDownloadImage={downloadImage}
           onClose={() => setScanDetail(null)}
           onInspect={
-            scanDetail.filled_image
-              ? () =>
-                  openFullscreenImage({
-                    originalSrc: scanDetail.preview_image,
-                    originalAlt: 'Original scan',
-                    filledSrc: scanDetail.filled_image,
-                    filledAlt: 'Filled form',
-                    title: scanDetail.name,
-                    subtitle: 'Inspect the scan and filled result in full screen',
-                  })
-              : undefined
+            scanDetail.filled_image ? () => setDetailInspect(scanDetail) : undefined
           }
         />
       )}
 
-      {cropOpen && captured && (
-        <CropImage
-          src={captured}
-          onCancel={() => setCropOpen(false)}
-          onCrop={(cropped) => {
-            setCaptured(cropped)
-            setCropOpen(false)
-            showToast('Scan cropped')
-          }}
-        />
-      )}
-
-      {fullscreenImage && (
+      {detailInspect && detailInspect.filled_image && (
         <FullscreenImageViewer
-          open={!!fullscreenImage}
-          onClose={() => setFullscreenImage(null)}
-          originalSrc={fullscreenImage.originalSrc}
-          originalAlt={fullscreenImage.originalAlt}
-          filledSrc={fullscreenImage.filledSrc}
-          filledAlt={fullscreenImage.filledAlt}
-          title={fullscreenImage.title}
-          subtitle={fullscreenImage.subtitle}
+          open
+          onClose={() => setDetailInspect(null)}
+          originalSrc={detailInspect.preview_image}
+          originalAlt="Original scan"
+          filledSrc={detailInspect.filled_image}
+          filledAlt="Filled form"
+          title={detailInspect.name}
+          subtitle="Inspect the scan and filled result in full screen"
         />
       )}
 
-      {settingsOpen && (
+      {settings.open && (
         <EngineSettingsDialog
-          serverUrl={serverUrlInput}
-          onServerUrl={setServerUrlInput}
-          serverKey={serverKeyInput}
-          onServerKey={setServerKeyInput}
-          llm={llm}
-          onLlm={setLlm}
-          modelOptions={modelOptions}
-          modelsLoading={modelsLoading}
-          modelsError={modelsError}
-          onLoadModels={loadModels}
-          ocrTesting={ocrTesting}
-          ocrTestOk={ocrTestOk}
-          ocrTestMsg={ocrTestMsg}
-          onTestOcr={testOcr}
-          llmTesting={llmTesting}
-          llmTestOk={llmTestOk}
-          llmTestMsg={llmTestMsg}
-          onTestLlm={testLlm}
-          engineLabel={engine === 'server' ? 'Unlimited-OCR server' : 'On-device (Tesseract)'}
-          onClose={() => setSettingsOpen(false)}
-          onSave={saveSettings}
+          serverUrl={settings.serverUrlInput}
+          onServerUrl={settings.setServerUrlInput}
+          serverKey={settings.serverKeyInput}
+          onServerKey={settings.setServerKeyInput}
+          llm={settings.llm}
+          onLlm={settings.setLlm}
+          modelOptions={settings.modelOptions}
+          modelsLoading={settings.modelsLoading}
+          modelsError={settings.modelsError}
+          onLoadModels={settings.loadModels}
+          ocrTesting={settings.ocrTesting}
+          ocrTestOk={settings.ocrTestOk}
+          ocrTestMsg={settings.ocrTestMsg}
+          onTestOcr={settings.testOcr}
+          llmTesting={settings.llmTesting}
+          llmTestOk={settings.llmTestOk}
+          llmTestMsg={settings.llmTestMsg}
+          onTestLlm={settings.testLlm}
+          engineLabel={settings.engine === 'server' ? 'Unlimited-OCR server' : 'On-device (Tesseract)'}
+          onClose={settings.close}
+          onSave={settings.saveSettings}
         />
       )}
 
       <TabBar tab={tab} onTabChange={changeTab} />
     </div>
+    </MotionConfig>
   )
 }
